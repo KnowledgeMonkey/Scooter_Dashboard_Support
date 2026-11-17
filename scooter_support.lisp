@@ -163,6 +163,7 @@
 
 ; sound feedback
 (def feedback 0)
+(def profile-change-beep true)
 (def beep-time (systime)) ; when the last beep byte actually went out
 
 ; dash link watchdog: last time a throttle frame was received
@@ -419,6 +420,7 @@
     (app-enable 85 b false)
     (power-pin 88 i 0)
     (cruise-allow 93 b false)
+    (profile-change-beep 99 b true)
 ))
 
 ; Each group is one line to and from the UI: the name it travels under, then its
@@ -453,6 +455,7 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (sound profile-change-beep)
 ))
 
 ; stored in km/h, kept at runtime in m/s or under another name - load-settings
@@ -2167,7 +2170,7 @@
 (defun toggle-secret()
     {
         (set 'unlock (not unlock))
-        (set 'feedback 2) ; beep 2x
+        (if profile-change-beep (set 'feedback 2)) ; beep 2x
         (apply-mode)
     }
 )

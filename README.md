@@ -74,6 +74,7 @@ One package for everything - the model is stored on the ESC and selected in the 
   at all. One switch covers normal and secret together, and anything switched off is left
   exactly as VESC has it - so you can keep your own field weakening setup
 - Selectable startup mode, restored every time the dashboard is switched on
+- Profile Change Beep in General can silence entering and leaving secret modes; the setting is saved on the ESC.
 
 ### 🎛️ Gestures
 Lock, mode switching, headlight, secret mode and leaving secret mode are fully remappable:

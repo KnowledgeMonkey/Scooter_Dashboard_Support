@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound"]
 
     function markSettingsSeen(key) {
         if (settingsMsgs.indexOf(key) < 0 || settingsSeen[key])
@@ -892,6 +892,8 @@ Item {
         saveGroup("alarm", [boolAtom(alarmTone), readSpeed(alarmSpeedThreshold, 1),
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
+        saveGroup("sound", [boolAtom(profileChangeBeep)])
+
         queueCode("(finish-settings-save)")
 
         // Model change needs a lisp restart, ack-gated via "model-ok"
@@ -922,7 +924,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -995,6 +997,8 @@ Item {
             setSpeed(minSpeed, parts[5], 1)
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
+        } else if (parts[0] === "sound") {
+            profileChangeBeep.checked = parseBoolToken(parts[1])
         } else if (parts[0] === "temps") {
             setTemp(tempWarningMotor, parts[1], 1)
             setTemp(tempWarningFet, parts[2], 1)
@@ -2564,6 +2568,13 @@ Item {
                                     }
                                 }
                                 Label { text: "The mode the scooter starts in when the VESC is turned on."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Profile Change Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: profileChangeBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
 
                                 RowLayout {
                                     Layout.fillWidth: true
