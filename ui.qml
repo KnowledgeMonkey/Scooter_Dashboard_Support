@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps"]
 
     function markSettingsSeen(key) {
         if (settingsMsgs.indexOf(key) < 0 || settingsSeen[key])
@@ -893,6 +893,7 @@ Item {
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
         saveGroup("sound", [boolAtom(profileChangeBeep)])
+        saveGroup("beeps", [boolAtom(powerOnBeep), boolAtom(powerOffBeep), boolAtom(lockBeep), boolAtom(unlockBeep), boolAtom(lockedButtonBeep), boolAtom(cruiseStartBeep), boolAtom(cruiseStopBeep), boolAtom(cruiseToggleBeep), boolAtom(hornBeep), boolAtom(findBeep), boolAtom(alarmBeep)])
 
         queueCode("(finish-settings-save)")
 
@@ -924,7 +925,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm", "sound"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -999,6 +1000,18 @@ Item {
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
         } else if (parts[0] === "sound") {
             profileChangeBeep.checked = parseBoolToken(parts[1])
+        } else if (parts[0] === "beeps") {
+            powerOnBeep.checked = parseBoolToken(parts[1])
+            powerOffBeep.checked = parseBoolToken(parts[2])
+            lockBeep.checked = parseBoolToken(parts[3])
+            unlockBeep.checked = parseBoolToken(parts[4])
+            lockedButtonBeep.checked = parseBoolToken(parts[5])
+            cruiseStartBeep.checked = parseBoolToken(parts[6])
+            cruiseStopBeep.checked = parseBoolToken(parts[7])
+            cruiseToggleBeep.checked = parseBoolToken(parts[8])
+            hornBeep.checked = parseBoolToken(parts[9])
+            findBeep.checked = parseBoolToken(parts[10])
+            alarmBeep.checked = parseBoolToken(parts[11])
         } else if (parts[0] === "temps") {
             setTemp(tempWarningMotor, parts[1], 1)
             setTemp(tempWarningFet, parts[2], 1)
@@ -1665,10 +1678,10 @@ Item {
                 color: root.cWell
 
                 Rectangle {
-                    width: secTrack.width / 3
+                    width: secTrack.width / 4
                     height: parent.height
                     radius: parent.radius
-                    x: (swipeView.currentIndex - 1) * secTrack.width / 3
+                    x: (swipeView.currentIndex - 1) * secTrack.width / 4
                     color: root.cEdge
                     Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                 }
@@ -1676,9 +1689,9 @@ Item {
                 Row {
                     anchors.fill: parent
                     Repeater {
-                        model: ["General", "Modes", "Setup"]
+                        model: ["General", "Modes", "Setup", "el sus"]
                         Item {
-                            width: secTrack.width / 3
+                            width: secTrack.width / 4
                             height: secTrack.height
                             Label {
                                 anchors.centerIn: parent
@@ -2569,12 +2582,7 @@ Item {
                                 }
                                 Label { text: "The mode the scooter starts in when the VESC is turned on."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 40
-                                    Label { font.bold: true; text: "Profile Change Beep"; Layout.fillWidth: true }
-                                    CheckBox { id: profileChangeBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
-                                }
+
 
                                 RowLayout {
                                     Layout.fillWidth: true
@@ -2633,16 +2641,12 @@ Item {
                                 }
                                 Label { text: "Select what to show while standing still."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 40
-                                    Label { font.bold: true; text: "Alarm"; Layout.fillWidth: true }
-                                    CheckBox { id: alarmTone; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
-                                }
-                                Label { text: "Enable the alarm when the scooter is locked."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6; Layout.bottomMargin: 6 }
+
 
                             }
                         }
+
+
                         Label { text: "Lights"; font.bold: true; font.pointSize: root.titleSize * 0.92; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; opacity: 0.8; Layout.topMargin: 26; Layout.leftMargin: 4 }
                         Rectangle {
                             Layout.fillWidth: true
@@ -3743,6 +3747,129 @@ Item {
                     }
                 }
             }
+
+            Page {
+                enabled: !isSlave
+                ScrollView {
+                    id: soundsScroll
+                    anchors.fill: parent
+                    contentWidth: availableWidth
+                    contentHeight: soundsCol.implicitHeight
+                    clip: true
+                    Component.onCompleted: contentItem.boundsBehavior = Flickable.StopAtBounds
+                    ColumnLayout {
+                        id: soundsCol
+                        width: soundsScroll.availableWidth
+                        spacing: 4
+                        Label { text: "Sounds"; font.bold: true; font.pointSize: root.titleSize * 0.92; Layout.topMargin: 12; Layout.leftMargin: 4 }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: soundsCard.implicitHeight + 28
+                            radius: 14
+                            color: root.cDeep
+                            border.width: root.darkUi ? 0 : 1
+                            border.color: root.cEdge
+                            ColumnLayout {
+                                id: soundsCard
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 14
+                                spacing: 4
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Profile Change Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: profileChangeBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Power On Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: powerOnBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Power Off Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: powerOffBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Lock Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: lockBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Unlock Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: unlockBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Locked Button Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: lockedButtonBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Cruise Start Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: cruiseStartBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Cruise Stop Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: cruiseStopBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Cruise Switch Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: cruiseToggleBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "G2 Horn"; Layout.fillWidth: true }
+                                    CheckBox { id: hornBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Find My Scooter Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: findBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Alarm Beeps"; Layout.fillWidth: true }
+                                    CheckBox { id: alarmBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Alarm Siren"; Layout.fillWidth: true }
+                                    CheckBox { id: alarmTone; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         RowLayout {
@@ -3875,17 +4002,7 @@ Item {
                 return
             }
 
-            if (message.startsWith("model ")
-                    || message.startsWith("general ")
-                    || message.startsWith("temps ")
-                    || message.startsWith("modes ")
-                    || message.startsWith("secret ")
-                    || message.startsWith("apply ")
-                    || message.startsWith("gesture ")
-                    || message.startsWith("misc ")
-                    || message.startsWith("rear ")
-                    || message.startsWith("cruise ")
-                    || message.startsWith("alarm ")) {
+            if (settingsMsgs.indexOf(message.split(" ")[0]) >= 0) {
                 applySettingsLine(message)
             } else if (message === "model-ok") {
                 root.stepDone()

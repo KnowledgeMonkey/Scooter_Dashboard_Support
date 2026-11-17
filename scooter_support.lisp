@@ -164,6 +164,17 @@
 ; sound feedback
 (def feedback 0)
 (def profile-change-beep true)
+(def power-on-beep true)
+(def power-off-beep true)
+(def lock-beep true)
+(def unlock-beep true)
+(def locked-button-beep true)
+(def cruise-start-beep true)
+(def cruise-stop-beep true)
+(def cruise-toggle-beep true)
+(def horn-beep true)
+(def find-beep true)
+(def alarm-beep true)
 (def beep-time (systime)) ; when the last beep byte actually went out
 
 ; dash link watchdog: last time a throttle frame was received
@@ -421,6 +432,17 @@
     (power-pin 88 i 0)
     (cruise-allow 93 b false)
     (profile-change-beep 99 b true)
+    (power-on-beep 100 b true)
+    (power-off-beep 101 b true)
+    (lock-beep 102 b true)
+    (unlock-beep 103 b true)
+    (locked-button-beep 104 b true)
+    (cruise-start-beep 105 b true)
+    (cruise-stop-beep 106 b true)
+    (cruise-toggle-beep 107 b true)
+    (horn-beep 108 b true)
+    (find-beep 109 b true)
+    (alarm-beep 110 b true)
 ))
 
 ; Each group is one line to and from the UI: the name it travels under, then its
@@ -456,6 +478,7 @@
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
     (sound profile-change-beep)
+    (beeps power-on-beep power-off-beep lock-beep unlock-beep locked-button-beep cruise-start-beep cruise-stop-beep cruise-toggle-beep horn-beep find-beep alarm-beep)
 ))
 
 ; stored in km/h, kept at runtime in m/s or under another name - load-settings
@@ -746,7 +769,7 @@
     (if on
         (if off {
             (set 'off false)
-            (set 'feedback 1)
+            (if power-on-beep (set 'feedback 1))
             (set 'unlock false)
             (boot-state)
             (apply-mode)
@@ -754,7 +777,7 @@
         })
         (if (and (not off) (not lock) (<= (abs (get-speed)) 1.0)) {
             (set 'light false)
-            (set 'feedback 1)
+            (if power-off-beep (set 'feedback 1))
             (set 'unlock false)
             (apply-mode)
             (set 'off true)
@@ -1181,7 +1204,7 @@
         (set 'cruising false)
         (set 'cruise-blocked true) ; no re-arming until the throttle is released
         (app-adc-override 3 0) ; release the ADC app's cruise button
-        (set 'feedback 1)
+        (if cruise-stop-beep (set 'feedback 1))
     })
 )
 
@@ -1240,7 +1263,7 @@
                                 (set 'cruise-v1-start (conf-get 'adc-v1-start)) ; fresh from the app config
                                 (set 'cruise-shown-time (systime))
                                 (app-adc-override 3 1) ; hold the cruise button
-                                (set 'feedback 2)
+                                (if cruise-start-beep (set 'feedback 2))
                                 (set 'cruise-since (systime))
                             })
                         }
@@ -1819,7 +1842,7 @@
         ; this turns it off the same way the appUI button and a long press do,
         ; rather than cutting the whole vehicle
         ((= reg 0x79) (if (!= val 0) (app-todo+ 64)))
-        ((= reg 0x7e) (if (!= val 0) (set 'feedback 3))) ; find my scooter
+        ((= reg 0x7e) (if (and find-beep (!= val 0)) (set 'feedback 3))) ; find my scooter
         ((or (= reg 0x91) (= reg 0x92)) (let ((v (!= val 0)))
             (if (not (eq v alarm-tone)) {
                 (set 'alarm-tone v)
@@ -2054,10 +2077,10 @@
     (if (>= len 4)
         (let ((a (bufget-u8 uart-buf 7)))
             {
-                (if (= a 0x60) (set 'feedback 1)) ; refreshed while held
+                (if (= a 0x60) (if horn-beep (set 'feedback 1))) ; refreshed while held
                 (if (and (= a 0x50) (!= g2-aux 0x50) cruise-allow (not off) (not lock)) {
                     (set 'cruise-enabled (not cruise-enabled))
-                    (set 'feedback 2)
+                    (if cruise-toggle-beep (set 'feedback 2))
                     (app-todo+ 1) ; the flash write waits for the feature loop
                 })
                 (set 'g2-aux a)
@@ -2180,7 +2203,7 @@
         (set 'lock (not lock)) ; lock on or off
         (if (and lock secret-exit-on-lock) (set 'unlock false)) ; optionally leave secret mode when locking
         (apply-mode)
-        (set 'feedback 1) ; beep feedback
+        (if (if lock lock-beep unlock-beep) (set 'feedback 1)) ; beep feedback
         (if (not lock)
             (stop-alarm)
         )
@@ -2219,7 +2242,7 @@
             ((and off (= presses 1)) ; power on always wins when off
                 {
                     (set 'off false) ; turn on
-                    (set 'feedback 1) ; beep feedback
+                    (if power-on-beep (set 'feedback 1)) ; beep feedback
                     (set 'unlock false) ; Disable unlock on turn off
                     (boot-state)
                     (apply-mode) ; Apply mode on start-up
@@ -2257,7 +2280,7 @@
                     (combo-held light-combo thr brk))
                 (toggle-light)
             )
-            (lock (set 'feedback 1)) ; locked: beep on any unmatched press
+            (lock (if locked-button-beep (set 'feedback 1))) ; locked: beep on any unmatched press
         )
     }
 )
@@ -2317,7 +2340,7 @@
         (if (and (not lock) (not off)) ; it is locked and off?
             {
                 (set 'light false) ; turn off light
-                (set 'feedback 1) ; beep feedback
+                (if power-off-beep (set 'feedback 1)) ; beep feedback
                 (set 'unlock false) ; Disable unlock on turn off
                 (apply-mode)
                 (set 'off true) ; turn off
@@ -2451,7 +2474,7 @@
                     (if alarm-tone
                         (play-tone 0 4000 alarm-voltage)
                     )
-                    (set 'feedback 1)
+                    (if alarm-beep (set 'feedback 1))
                 }
             )
             ((= alarm 3) ; second tone
@@ -2459,7 +2482,7 @@
                     (if alarm-tone
                         (play-tone 2 7000 alarm-voltage)
                     )
-                    (set 'feedback 1)
+                    (if alarm-beep (set 'feedback 1))
                 }
             )
             ((= alarm 6) ; third tone
@@ -2467,7 +2490,7 @@
                     (if alarm-tone
                         (play-tone 1 2000 alarm-voltage)
                     )
-                    (set 'feedback 1)
+                    (if alarm-beep (set 'feedback 1))
                 }
 
             )
@@ -2476,7 +2499,7 @@
                     (if alarm-tone
                         (stop-tone)
                     )
-                    (set 'feedback 1)
+                    (if alarm-beep (set 'feedback 1))
                     (set 'alarm 1) ; reset alarm to 1
                 }
             )

@@ -2,6 +2,7 @@ name: Build Scooter Dashboard Support Package
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -26,6 +27,7 @@ jobs:
         run: |
           python3 tools/check_qml.py ui.qml
           python3 tools/check_lisp.py scooter_support.lisp
+          python3 -m unittest discover -s tools -p "test_*.py"
 
       - name: Prepare runtime paths
         run: |
@@ -44,7 +46,7 @@ jobs:
           path: |
             ${{ env.VESC_TOOL_DIR }}/bin/vesc_tool
             ${{ env.VESC_TOOL_DIR }}/upstream-sha.txt
-          key: ${{ runner.os }}-vesc-tool-${{ env.VESC_TOOL_BRANCH }}-${{ steps.vesc_tool_ref.outputs.sha }}-${{ hashFiles('.github/workflows/build-vescpkg.yml') }}
+          key: ${{ runner.os }}-vesc-tool-${{ env.VESC_TOOL_BRANCH }}-${{ steps.vesc_tool_ref.outputs.sha }}-toolchain-v1
 
       - name: Install Linux dependencies
         run: |
@@ -132,3 +134,26 @@ jobs:
           if-no-files-found: error
           path: release.vescpkg
           retention-days: 30
+
+  release:
+    name: Publish numbered release
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release script
+        uses: actions/checkout@v4
+      - name: Download built package
+        uses: actions/download-artifact@v4
+        with:
+          name: scooter-dashboard-support-${{ github.sha }}
+      - name: Publish release and package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/publish_release.py

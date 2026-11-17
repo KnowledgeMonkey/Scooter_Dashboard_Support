@@ -74,7 +74,7 @@ One package for everything - the model is stored on the ESC and selected in the 
   at all. One switch covers normal and secret together, and anything switched off is left
   exactly as VESC has it - so you can keep your own field weakening setup
 - Selectable startup mode, restored every time the dashboard is switched on
-- Profile Change Beep in General can silence entering and leaving secret modes; the setting is saved on the ESC.
+- The el sus tab has saved switches for profile changes, power on/off, lock/unlock, locked button presses, cruise start/stop/switching, the G2 horn, Find My Scooter and alarm beeps. Alarm Siren separately controls the motor tone. These switches cover sounds requested by this package; sounds produced independently by dashboard firmware are unchanged.
 
 ### 🎛️ Gestures
 Lock, mode switching, headlight, secret mode and leaving secret mode are fully remappable:
