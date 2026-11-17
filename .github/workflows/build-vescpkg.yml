@@ -5,9 +5,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-concurrency:
-  group: build-vescpkg-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 env:
   VESC_TOOL_BRANCH: release_7_00
@@ -17,10 +16,16 @@ jobs:
   build:
     name: Build release.vescpkg
     runs-on: ubuntu-22.04
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Check package sources
+        run: |
+          python3 tools/check_qml.py ui.qml
+          python3 tools/check_lisp.py scooter_support.lisp
 
       - name: Prepare runtime paths
         run: |
@@ -126,3 +131,4 @@ jobs:
           name: scooter-dashboard-support-${{ github.sha }}
           if-no-files-found: error
           path: release.vescpkg
+          retention-days: 30
