@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "start"]
 
     function markSettingsSeen(key) {
         if (settingsMsgs.indexOf(key) < 0 || settingsSeen[key])
@@ -828,7 +828,7 @@ Item {
     function convertSpeedFields(toMiles) {
         var factor = toMiles ? mphFactor : (1 / mphFactor)
         var fs = [ecoSpeed, driveSpeed, sportSpeed, secretEcoSpeed, secretDriveSpeed,
-            secretSportSpeed, minSpeed, buttonSpeed, cruiseDeviation, cruiseMinSpeed,
+            secretSportSpeed, minSpeed, secretMinSpeed, buttonSpeed, cruiseDeviation, cruiseMinSpeed,
             cruiseMaxSpeed, alarmSpeedThreshold]
         for (var i = 0; i < fs.length; i++) {
             var n = Number.parseFloat(fs[i].text.replace(",", "."))
@@ -854,7 +854,7 @@ Item {
 
         saveGroup("general", [boolAtom(softwareAdc), boolAtom(softwareAdc2),
             boolAtom(showBatteryInIdle), boolAtom(showBatterySecret),
-            readSpeed(minSpeed, 1), boolAtom(appEnable), idleDisplay.currentIndex])
+            Math.max(0, readSpeed(minSpeed, 1)), boolAtom(appEnable), idleDisplay.currentIndex])
 
         saveGroup("temps", [readTemp(tempWarningMotor, 1), readTemp(tempWarningFet, 1),
             readTemp(bmsTempHi, 1), readTemp(bmsTempLo, 1)])
@@ -892,6 +892,7 @@ Item {
         saveGroup("alarm", [boolAtom(alarmTone), readSpeed(alarmSpeedThreshold, 1),
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
+        saveGroup("start", [Math.max(0, readSpeed(secretMinSpeed, 1))])
         saveGroup("sound", [boolAtom(profileChangeBeep)])
         saveGroup("beeps", [boolAtom(powerOnBeep), boolAtom(powerOffBeep), boolAtom(lockBeep), boolAtom(unlockBeep), boolAtom(lockedButtonBeep), boolAtom(cruiseStartBeep), boolAtom(cruiseStopBeep), boolAtom(cruiseToggleBeep), boolAtom(hornBeep), boolAtom(findBeep), boolAtom(alarmBeep)])
 
@@ -925,7 +926,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "start"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -998,6 +999,8 @@ Item {
             setSpeed(minSpeed, parts[5], 1)
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
+        } else if (parts[0] === "start") {
+            setSpeed(secretMinSpeed, parts[1], 1)
         } else if (parts[0] === "sound") {
             profileChangeBeep.checked = parseBoolToken(parts[1])
         } else if (parts[0] === "beeps") {
@@ -2596,8 +2599,15 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 40
-                                    Label { font.bold: true; text: "Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
+                                    Label { font.bold: true; text: "Normal Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
                                     TextField { font.pointSize: root.titleSize * 0.95; id: minSpeed; horizontalAlignment: TextInput.AlignHCenter; Layout.preferredWidth: 100; maximumLength: 7; inputMethodHints: Qt.ImhFormattedNumbersOnly; topPadding: 0; bottomPadding: 0; leftPadding: 6; rightPadding: 6; verticalAlignment: TextInput.AlignVCenter; background: Rectangle { radius: 10; implicitHeight: 34; color: parent.enabled ? root.cCtl : root.cCard } }
+                                }
+                                RowLayout {
+                                    enabled: secretEnabled.checked
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Secret Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
+                                    TextField { font.pointSize: root.titleSize * 0.95; id: secretMinSpeed; horizontalAlignment: TextInput.AlignHCenter; Layout.preferredWidth: 100; maximumLength: 7; inputMethodHints: Qt.ImhFormattedNumbersOnly; topPadding: 0; bottomPadding: 0; leftPadding: 6; rightPadding: 6; verticalAlignment: TextInput.AlignVCenter; background: Rectangle { radius: 10; implicitHeight: 34; color: parent.enabled ? root.cCtl : root.cCard } }
                                 }
                                 Label { text: "Kick-off speed. Throttle will not work below this value."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 

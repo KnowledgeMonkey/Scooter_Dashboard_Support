@@ -13,7 +13,8 @@
 (def idle-display 0) ; 0 battery %, 1 battery V, 2 controller C, 3 motor C
 (def last-alarm-code 0) ; the code the app reads back after an alarm has cleared
 (def show-batt-idle-secret false) ; same but in secret modes
-(def min-speed 1) ; minimum speed in km/h to enable throttle and brake
+(def min-speed 1) ; normal kick-start speed in km/h
+(def secret-min-speed 1) ; secret kick-start speed in km/h
 (def button-safety-speed (/ 0.1 3.6)) ; disabling button above 0.1 km/h (due to safety reasons)
 
 ; Alarm parameters (foc-play-tone)
@@ -351,6 +352,7 @@
     (bms-temp-lo 98 f 0.0)
     (show-batt-in-idle 6 b false)
     (min-speed-kmh 7 f 1.0)
+    (secret-min-speed-kmh 111 f 1.0)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5)
     (alarm-gyro-threshold 10 f 10.0)
@@ -477,13 +479,14 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (start secret-min-speed-kmh)
     (sound profile-change-beep)
     (beeps power-on-beep power-off-beep lock-beep unlock-beep locked-button-beep cruise-start-beep cruise-stop-beep cruise-toggle-beep horn-beep find-beep alarm-beep)
 ))
 
 ; stored in km/h, kept at runtime in m/s or under another name - load-settings
 ; converts these by hand instead of copying them straight across
-(def speed-settings '(min-speed-kmh button-speed-kmh eco-speed-kmh drive-speed-kmh
+(def speed-settings '(min-speed-kmh secret-min-speed-kmh button-speed-kmh eco-speed-kmh drive-speed-kmh
     sport-speed-kmh secret-eco-speed-kmh secret-drive-speed-kmh secret-sport-speed-kmh))
 
 (def last-button-state false)
@@ -579,7 +582,11 @@
         (set 'cruise-enabled (let ((v (read-setting 'cruise-enabled))) (if (eq v 'unset) cruise-enabled v)))
         ; these divide, so an unwritten slot has to come back as its default and
         ; not as nil - setting-def is what guarantees that
-        (set 'min-speed (setting-def 'min-speed-kmh))
+        ; Preserve the shared kick-start value on first upgrade, including 1.0.
+        (if (eq (read-setting 'secret-min-speed-kmh) 'unset)
+            (eeprom-store-f 111 (max 0.0 (setting-def 'min-speed-kmh))))
+        (set 'min-speed (max 0.0 (setting-def 'min-speed-kmh)))
+        (set 'secret-min-speed (max 0.0 (setting-def 'secret-min-speed-kmh)))
         (set 'eco-speed (/ (setting-def 'eco-speed-kmh) 3.6))
         (set 'drive-speed (/ (setting-def 'drive-speed-kmh) 3.6))
         (set 'sport-speed (/ (setting-def 'sport-speed-kmh) 3.6))
@@ -1199,6 +1206,10 @@
     })
 )
 
+(defun active-start-speed ()
+    (if unlock secret-min-speed min-speed)
+)
+
 (defun cruise-cancel()
     (if cruising {
         (set 'cruising false)
@@ -1250,7 +1261,7 @@
                     }
                     ; also never below the kick-start speed - output is disabled
                     ; down there, so cruise would arm against a dead motor
-                    (if (and (not cruise-blocked) (>= speed-kmh min-speed)
+                    (if (and (not cruise-blocked) (>= speed-kmh (active-start-speed))
                              (>= speed-kmh cruise-min-speed) (<= speed-kmh cruise-max-speed))
                         {
                             (if (> (abs (- speed-kmh cruise-ref)) cruise-deviation) {
@@ -1324,7 +1335,7 @@
 
         (trap (handle-cruise current-speed)) ; experimental - never let it break the loop
 
-        (if (or off lock (< current-speed min-speed))
+        (if (or off lock (< current-speed (active-start-speed)))
             (if (not (app-is-output-disabled)) ; Disable output when scooter is turned off
                 {
                     (app-adc-override 0 0)
