@@ -116,6 +116,10 @@
 (def apply-om false)
 
 ; Cruise control (experimental)
+(def normal-cruise-allow true)
+(def normal-ramp-time 0.0)
+(def throttle-ramp-level 0.0)
+(def throttle-ramp-time 0)
 (def cruise-allow false) ; master switch - without it nothing can turn cruise on
 (def cruise-enabled false)
 (def cruise-delay 5.0) ; seconds of steady speed to activate
@@ -353,6 +357,8 @@
     (show-batt-in-idle 6 b false)
     (min-speed-kmh 7 f 1.0)
     (secret-min-speed-kmh 111 f 1.0)
+    (normal-ramp-time 112 f 0.0)
+    (normal-cruise-allow 113 b true)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5)
     (alarm-gyro-threshold 10 f 10.0)
@@ -479,6 +485,7 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (normal normal-ramp-time normal-cruise-allow)
     (start secret-min-speed-kmh)
     (sound profile-change-beep)
     (beeps power-on-beep power-off-beep lock-beep unlock-beep locked-button-beep cruise-start-beep cruise-stop-beep cruise-toggle-beep horn-beep find-beep alarm-beep)
@@ -587,6 +594,7 @@
             (eeprom-store-f 111 (max 0.0 (setting-def 'min-speed-kmh))))
         (set 'min-speed (max 0.0 (setting-def 'min-speed-kmh)))
         (set 'secret-min-speed (max 0.0 (setting-def 'secret-min-speed-kmh)))
+        (set 'normal-ramp-time (max 0.0 (min 10.0 normal-ramp-time)))
         (set 'eco-speed (/ (setting-def 'eco-speed-kmh) 3.6))
         (set 'drive-speed (/ (setting-def 'drive-speed-kmh) 3.6))
         (set 'sport-speed (/ (setting-def 'sport-speed-kmh) 3.6))
@@ -751,9 +759,13 @@
 
 ; Enable/disable the cruise feature live from the Control tab. Persisted so it
 ; survives a reboot, and cancels any active hold when switched off.
+(defun cruise-available ()
+    (and cruise-allow (or unlock normal-cruise-allow))
+)
+
 (defun ctrl-cruise (on)
     {
-        (set 'cruise-enabled (and on cruise-allow))
+        (set 'cruise-enabled (and on (cruise-available)))
         (write-setting 'cruise-enabled cruise-enabled)
         (if (not cruise-enabled) (cruise-cancel))
     }
@@ -816,8 +828,8 @@
             (str-from-n cur-amps "%.1f ")
             (str-from-n (send-state-maxkmh) "%.0f ")
             (tf cruising)
-            (tf cruise-enabled)
-            (tf cruise-allow)
+            (tf (and cruise-enabled (cruise-available)))
+            (tf (cruise-available))
             (tf img-ok)
             (str-from-n cur-fet-max "%.0f ")
             (str-from-n cur-mot-max "%.0f ")
@@ -1079,8 +1091,43 @@
 (defun calib-start-thr() (calib-start-channel 'thr))
 (defun calib-start-brk() (calib-start-channel 'brk))
 
-; lever frames - off shifts to the levers in a 0x61, and the enable test
-; lives here so every caller does not have to repeat it
+; Rise only: releasing the throttle and applying the brake never wait for a ramp.
+(defun ramp-rise (previous target dt seconds)
+    (if (or (<= seconds 0.0) (<= target previous)) target
+        (min target (+ previous (/ (max 0.0 (min dt 0.1)) seconds))))
+)
+
+(defun normal-throttle (throttle brake)
+    {
+        (var dt (secs-since throttle-ramp-time))
+        (set 'throttle-ramp-time (systime))
+        (if (or unlock (not software-adc) (<= normal-ramp-time 0.0) cruising)
+            { (set 'throttle-ramp-level 0.0) throttle }
+            {
+                (if (> dt 0.5) (set 'throttle-ramp-level 0.0))
+                (var start (conf-get 'adc-v1-start))
+                (var span (- (conf-get 'adc-v1-end) start))
+                (var brk-start (conf-get 'adc-v2-start))
+                (var brk-span (- (conf-get 'adc-v2-end) brk-start))
+                (var braking (if software-adc2
+                    (and (> (abs brk-span) 0.01) (> (/ (- brake brk-start) brk-span) adc-touch))
+                    (> (get-adc-decoded 1) adc-touch)))
+                (if (or off lock braking (not (eq calib-stage 'idle))
+                        (< (abs span) 0.01)
+                        (< (abs (* (get-speed) 3.6)) (active-start-speed)))
+                    { (set 'throttle-ramp-level 0.0) start }
+                    {
+                        (var target (max 0.0 (min 1.0 (/ (- throttle start) span))))
+                        (set 'throttle-ramp-level (ramp-rise throttle-ramp-level target dt normal-ramp-time))
+                        (+ start (* span throttle-ramp-level))
+                    }
+                )
+            }
+        )
+    }
+)
+
+; lever frames - off shifts to the levers in a 0x61
 (defunret adc-input (off)
     {
         (if (not (or software-adc software-adc2)) (return nil))
@@ -1122,6 +1169,7 @@
         (if (> brake 3.3) (setq brake 3.3))
 
         (set 'thr-corr-v throttle) ; pre-mask - cruise release detection needs it
+        (setq throttle (normal-throttle throttle brake))
 
         ; cruise capture-assist: hold the throttle signal at 0 from activation
         ; until the lever is physically released, so the app captures the speed
@@ -1224,7 +1272,7 @@
 ; PID-holds the speed and mirrors current to the slaves. Any lever input
 ; returns control instantly at firmware level; we just release the button.
 (defun handle-cruise(speed-kmh)
-    (if (and cruise-allow cruise-enabled (not off) (not lock))
+    (if (and (cruise-available) cruise-enabled (not off) (not lock))
         {
             (var thr lev-thr)
             (var brk lev-brk)
@@ -1818,7 +1866,7 @@
                 (set 'light v)
                 (app-refresh-7b)
             })))
-        ((= reg 0x7c) (let ((v (and (!= val 0) cruise-allow)))
+        ((= reg 0x7c) (let ((v (and (!= val 0) (cruise-available))))
             (if (not (eq v cruise-enabled)) {
                 (set 'cruise-enabled v)
                 (app-refresh-7b)
@@ -1921,7 +1969,7 @@
             ((= reg 0x7b) (cond ((= speedmode 1) 1) ((= speedmode 4) 2) (t 0))) ; shows the speed mode
             ((= reg 0x77) (if unlock 1 0))
             ((= reg 0x76) (if light 1 0))
-            ((= reg 0x7c) (if (and cruise-allow cruise-enabled) 1 0))
+            ((= reg 0x7c) (if (and (cruise-available) cruise-enabled) 1 0))
             ((= reg 0x7d) (if auto-taillight 2 0)) ; the app writes 2 for on
             ((or (= reg 0x24) (= reg 0x25)) (app-range-10m))
             ((= reg 0x3a) (to-i (secs-since app-boot-time)))
@@ -2089,7 +2137,7 @@
         (let ((a (bufget-u8 uart-buf 7)))
             {
                 (if (= a 0x60) (if horn-beep (set 'feedback 1))) ; refreshed while held
-                (if (and (= a 0x50) (!= g2-aux 0x50) cruise-allow (not off) (not lock)) {
+                (if (and (= a 0x50) (!= g2-aux 0x50) (cruise-available) (not off) (not lock)) {
                     (set 'cruise-enabled (not cruise-enabled))
                     (if cruise-toggle-beep (set 'feedback 2))
                     (app-todo+ 1) ; the flash write waits for the feature loop
@@ -2369,18 +2417,23 @@
 
 ; Speed mode implementation
 (defun apply-mode()
-    (if (not unlock)
-        (cond
-            ((= speedmode 1) (configure-speed drive-speed drive-watts drive-current drive-fw drive-om))
-            ((= speedmode 2) (configure-speed eco-speed eco-watts eco-current eco-fw eco-om))
-            ((= speedmode 4) (configure-speed sport-speed sport-watts sport-current sport-fw sport-om))
+    {
+        (set 'throttle-ramp-level 0.0)
+        (set 'throttle-ramp-time (systime))
+        (if (not (cruise-available)) (cruise-cancel))
+        (if (not unlock)
+            (cond
+                ((= speedmode 1) (configure-speed drive-speed drive-watts drive-current drive-fw drive-om))
+                ((= speedmode 2) (configure-speed eco-speed eco-watts eco-current eco-fw eco-om))
+                ((= speedmode 4) (configure-speed sport-speed sport-watts sport-current sport-fw sport-om))
+            )
+            (cond
+                ((= speedmode 1) (configure-speed secret-drive-speed secret-drive-watts secret-drive-current secret-drive-fw secret-drive-om))
+                ((= speedmode 2) (configure-speed secret-eco-speed secret-eco-watts secret-eco-current secret-eco-fw secret-eco-om))
+                ((= speedmode 4) (configure-speed secret-sport-speed secret-sport-watts secret-sport-current secret-sport-fw secret-sport-om))
+            )
         )
-        (cond
-            ((= speedmode 1) (configure-speed secret-drive-speed secret-drive-watts secret-drive-current secret-drive-fw secret-drive-om))
-            ((= speedmode 2) (configure-speed secret-eco-speed secret-eco-watts secret-eco-current secret-eco-fw secret-eco-om))
-            ((= speedmode 4) (configure-speed secret-sport-speed secret-sport-watts secret-sport-current secret-sport-fw secret-sport-om))
-        )
-    )
+    }
 )
 
 (defun configure-speed(speed watts current fw om) ; one gate per parameter, normal and secret alike

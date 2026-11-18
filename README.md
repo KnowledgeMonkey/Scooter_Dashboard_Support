@@ -106,6 +106,7 @@ Lock, mode switching, headlight, secret mode and leaving secret mode are fully r
 - **Cancels on any throttle or brake press** and your live lever takes over the same instant.
   It does not cancel on speed alone, so a bumpy road or traction control cannot drop it
 - Arms only inside a configurable **min/max speed window** (default 5 - 100 km/h)
+- **Allow Cruise in Normal Mode** in Setup independently blocks normal-profile cruise. Secret-profile cruise still follows the master switch. Returning to a blocked normal profile cancels an active cruise hold.
 - The Setup switch is a **master switch**: with it off, cruise cannot be turned on from the
   Control tab, an app or a gesture
 
@@ -177,6 +178,7 @@ including pairing.
 - **Light compensation** - the headlight sags throttle/brake voltage non-linearly, so this
   applies an affine correction (offset + gain) rather than a flat offset. A guided wizard in
   Setup measures it. The motor stays disengaged throughout, so **no stand is needed**
+- **Normal Acceleration Ramp (s)** in General smooths only rising dashboard throttle in normal profiles (0 disables it; up to 10 seconds from zero to full demand). Throttle release and braking bypass the ramp. It uses the ADC throttle mapping, preserves the configured current-control mode, and is unavailable with a throttle wired directly to the ADC pin. Existing VESC ramp/expo settings still apply.
 - **Motor start speed** (kick-start): separate Normal Start Speed and Secret Start Speed in General. The active profile selects the threshold; both initially retain the previously shared value on upgrade.
 
 ### 🔌 Dashboard power control

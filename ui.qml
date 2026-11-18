@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "start"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "start", "normal"]
 
     function markSettingsSeen(key) {
         if (settingsMsgs.indexOf(key) < 0 || settingsSeen[key])
@@ -892,6 +892,7 @@ Item {
         saveGroup("alarm", [boolAtom(alarmTone), readSpeed(alarmSpeedThreshold, 1),
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
+        saveGroup("normal", [Math.max(0, Math.min(10, readReal(normalRampTime, 2))), boolAtom(normalCruiseAllow)])
         saveGroup("start", [Math.max(0, readSpeed(secretMinSpeed, 1))])
         saveGroup("sound", [boolAtom(profileChangeBeep)])
         saveGroup("beeps", [boolAtom(powerOnBeep), boolAtom(powerOffBeep), boolAtom(lockBeep), boolAtom(unlockBeep), boolAtom(lockedButtonBeep), boolAtom(cruiseStartBeep), boolAtom(cruiseStopBeep), boolAtom(cruiseToggleBeep), boolAtom(hornBeep), boolAtom(findBeep), boolAtom(alarmBeep)])
@@ -926,7 +927,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "start"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "start", "normal"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -999,6 +1000,9 @@ Item {
             setSpeed(minSpeed, parts[5], 1)
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
+        } else if (parts[0] === "normal") {
+            setReal(normalRampTime, parts[1], 2)
+            normalCruiseAllow.checked = parseBoolToken(parts[2])
         } else if (parts[0] === "start") {
             setSpeed(secretMinSpeed, parts[1], 1)
         } else if (parts[0] === "sound") {
@@ -2597,6 +2601,13 @@ Item {
                                 Label { text: "Locking the scooter drops it back out of the secret modes."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
                                 RowLayout {
+                                    enabled: softwareAdc.checked
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Normal Acceleration Ramp (s)"; Layout.fillWidth: true }
+                                    TextField { font.pointSize: root.titleSize * 0.95; id: normalRampTime; horizontalAlignment: TextInput.AlignHCenter; Layout.preferredWidth: 100; maximumLength: 7; inputMethodHints: Qt.ImhFormattedNumbersOnly; topPadding: 0; bottomPadding: 0; leftPadding: 6; rightPadding: 6; verticalAlignment: TextInput.AlignVCenter; background: Rectangle { radius: 10; implicitHeight: 34; color: parent.enabled ? root.cCtl : root.cCard } }
+                                }
+                                RowLayout {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 40
                                     Label { font.bold: true; text: "Normal Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
@@ -3622,6 +3633,13 @@ Item {
                                         Layout.preferredHeight: 40
                                         Label { font.bold: true; text: "Cruise Control"; Layout.fillWidth: true }
                                         CheckBox { id: cruiseEnable; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                    }
+                                    RowLayout {
+                                        enabled: cruiseEnable.checked
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 40
+                                        Label { font.bold: true; text: "Allow Cruise in Normal Mode"; Layout.fillWidth: true }
+                                        CheckBox { id: normalCruiseAllow; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
                                     }
                                     Label { text: "Enables the use of Cruise Control. Can be quickly toggled on the dash."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
