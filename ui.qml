@@ -199,16 +199,46 @@ Item {
     property string themeBottom: "#702f62"
     property string themeImage: ""
 
+    property bool susUnlocked: false
+    property int crewIndex: 0
+    property string callsign: "Impostor"
+    readonly property var crewNames: ["Red", "Cyan", "Lime", "Purple", "Gold"]
+    readonly property var crewColors: ["#ff646d", "#79ecff", "#a4ed6c", "#d7a0ff", "#ffd674"]
+    property int dialTaps: 0
+    property double firstDialTap: 0
+
+    function tapDial(now) {
+        if (susUnlocked || isSlave || swipeView.currentIndex !== 0 || !lastSample ||
+                now - lastSample > 1000 || stSpeed !== 0) {
+            dialTaps = 0
+            return
+        }
+        if (!dialTaps || now - firstDialTap > 3000) {
+            firstDialTap = now
+            dialTaps = 0
+        }
+        if (++dialTaps === 5) {
+            dialTaps = 0
+            susUnlocked = true
+            dashTheme = 4
+            saveTheme()
+            VescIf.emitStatusMessage("Impostor theme unlocked", true)
+        }
+    }
+
     function saveTheme() {
         if (!uiPrefs) return
         uiPrefs.theme = dashTheme
         uiPrefs.topHex = themeTop
         uiPrefs.bottomHex = themeBottom
+        uiPrefs.sus = susUnlocked
+        uiPrefs.crew = crewIndex
+        uiPrefs.callsign = callsign
         uiPrefs.wallpaper = themeImage
     }
 
     function initPrefs() {
-        var decl = ' Settings { category: "scooter_dashboard_support"; property string statSlots: ""; property int theme: 0; property string topHex: "#22345a"; property string bottomHex: "#702f62"; property string wallpaper: "" }'
+        var decl = ' Settings { category: "scooter_dashboard_support"; property string statSlots: ""; property int theme: 0; property string topHex: "#22345a"; property string bottomHex: "#702f62"; property string wallpaper: ""; property bool sus: false; property int crew: 0; property string callsign: "Impostor" }'
         var mods = ["import Qt.labs.settings 1.0;", "import QtCore 6.5;"]
         for (var i = 0; i < mods.length; i++) {
             try {
@@ -217,6 +247,9 @@ Item {
             } catch (e) { uiPrefs = null }
         }
         if (uiPrefs) {
+            susUnlocked = uiPrefs.sus
+            crewIndex = Math.max(0, Math.min(crewColors.length - 1, uiPrefs.crew))
+            callsign = uiPrefs.callsign
             dashTheme = uiPrefs.theme
             themeTop = uiPrefs.topHex
             themeBottom = uiPrefs.bottomHex
@@ -509,6 +542,7 @@ Item {
     }
 
     function recordSample() {
+        if (stSpeed !== 0 || Date.now() - lastSample > 1000) dialTaps = 0
         lastSample = Date.now()
         toolsClock = lastSample
         fastest = Math.max(fastest, stSpeed)
@@ -1895,8 +1929,8 @@ Item {
                                 radius: parent.radius
                                 visible: root.dashTheme !== 0
                                 gradient: Gradient {
-                                    GradientStop { position: 0; color: root.themeTop }
-                                    GradientStop { position: 1; color: root.themeBottom }
+                                    GradientStop { position: 0; color: root.dashTheme === 4 ? "#ae1231" : root.themeTop }
+                                    GradientStop { position: 1; color: root.dashTheme === 4 ? "#110710" : root.themeBottom }
                                 }
                                 Column {
                                     anchors.fill: parent
@@ -2007,8 +2041,35 @@ Item {
                                 }
                             }
 
+                            Rectangle {
+                                visible: root.dashTheme === 4
+                                anchors.horizontalCenter: speedNum.horizontalCenter
+                                anchors.bottom: speedNum.top
+                                width: Math.min(dial.width * 0.49, crewTag.implicitWidth + 20)
+                                height: crewTag.implicitHeight + 5
+                                radius: height / 2
+                                color: "#21101a"
+                                border.color: root.crewColors[root.crewIndex]
+                                Label {
+                                    id: crewTag
+                                    anchors.centerIn: parent
+                                    width: parent.width - 12
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                    textFormat: Text.PlainText
+                                    text: root.callsign
+                                    font.pixelSize: Math.max(11, dial.drad * 0.1)
+                                    font.bold: true
+                                    color: parent.border.color
+                                }
+                            }
                             Label {
                                 id: speedNum
+                                MouseArea {
+                                    anchors.fill: parent
+                                    anchors.margins: -6
+                                    onClicked: root.tapDial(Date.now())
+                                }
                                 anchors.horizontalCenter: parent.left
                                 anchors.horizontalCenterOffset: dial.dcx
                                 anchors.verticalCenter: parent.top
@@ -3898,9 +3959,29 @@ Item {
                             Label { text: "Dashboard theme"; font.bold: true }
                             ComboBox {
                                 Layout.fillWidth: true
-                                model: ["System", "Israel · Anime", "Germany", "Custom"]
+                                model: ["System", "Israel · Anime", "Germany", "Custom"].concat(root.susUnlocked ? ["Impostor"] : [])
                                 currentIndex: root.dashTheme
                                 onActivated: { root.dashTheme = index; root.saveTheme() }
+                            }
+                            RowLayout {
+                                visible: root.dashTheme === 4
+                                Layout.fillWidth: true
+                                ComboBox {
+                                    model: root.crewNames
+                                    currentIndex: root.crewIndex
+                                    onActivated: { root.crewIndex = index; root.saveTheme() }
+                                }
+                                TextField {
+                                    Layout.fillWidth: true
+                                    maximumLength: 18
+                                    placeholderText: "Callsign"
+                                    text: root.callsign
+                                    onEditingFinished: {
+                                        root.callsign = text.trim() || "Impostor"
+                                        text = root.callsign
+                                        root.saveTheme()
+                                    }
+                                }
                             }
                             RowLayout {
                                 visible: root.dashTheme === 3
