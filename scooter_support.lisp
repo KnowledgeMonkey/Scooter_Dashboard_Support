@@ -338,6 +338,9 @@
 
 @const-start
 
+(defun min2 (a b) (if (< a b) a b))
+(defun max2 (a b) (if (> a b) a b))
+
 (def settings-version 420i32)
 
 ; Persistent settings: (label . (eeprom-offset type))
@@ -591,10 +594,10 @@
         ; not as nil - setting-def is what guarantees that
         ; Preserve the shared kick-start value on first upgrade, including 1.0.
         (if (eq (read-setting 'secret-min-speed-kmh) 'unset)
-            (eeprom-store-f 111 (max 0.0 (setting-def 'min-speed-kmh))))
-        (set 'min-speed (max 0.0 (setting-def 'min-speed-kmh)))
-        (set 'secret-min-speed (max 0.0 (setting-def 'secret-min-speed-kmh)))
-        (set 'normal-ramp-time (max 0.0 (min 10.0 normal-ramp-time)))
+            (eeprom-store-f 111 (max2 0.0 (setting-def 'min-speed-kmh))))
+        (set 'min-speed (max2 0.0 (setting-def 'min-speed-kmh)))
+        (set 'secret-min-speed (max2 0.0 (setting-def 'secret-min-speed-kmh)))
+        (set 'normal-ramp-time (max2 0.0 (min2 10.0 normal-ramp-time)))
         (set 'eco-speed (/ (setting-def 'eco-speed-kmh) 3.6))
         (set 'drive-speed (/ (setting-def 'drive-speed-kmh) 3.6))
         (set 'sport-speed (/ (setting-def 'sport-speed-kmh) 3.6))
@@ -1094,7 +1097,7 @@
 ; Rise only: releasing the throttle and applying the brake never wait for a ramp.
 (defun ramp-rise (previous target dt seconds)
     (if (or (<= seconds 0.0) (<= target previous)) target
-        (min target (+ previous (/ (max 0.0 (min dt 0.1)) seconds))))
+        (min2 target (+ previous (/ (max2 0.0 (min2 dt 0.1)) seconds))))
 )
 
 (defun normal-throttle (throttle brake)
@@ -1117,7 +1120,7 @@
                         (< (abs (* (get-speed) 3.6)) (active-start-speed)))
                     { (set 'throttle-ramp-level 0.0) start }
                     {
-                        (var target (max 0.0 (min 1.0 (/ (- throttle start) span))))
+                        (var target (max2 0.0 (min2 1.0 (/ (- throttle start) span))))
                         (set 'throttle-ramp-level (ramp-rise throttle-ramp-level target dt normal-ramp-time))
                         (+ start (* span throttle-ramp-level))
                     }

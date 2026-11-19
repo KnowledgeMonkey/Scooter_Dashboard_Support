@@ -24,7 +24,12 @@ class StartSpeedTests(unittest.TestCase):
         ev = lambda x: self.evaluate(x, state, saved)
         if op == 'if': return ev(args[1]) if ev(args[0]) else (ev(args[2]) if len(args) > 2 else None)
         if op == 'eq': return ev(args[0]) == ev(args[1])
-        if op == 'max': return max(map(ev, args))
+        if op in ('min2', 'max2'):
+            fn = FUNCTIONS[op]
+            bound = dict(state, **dict(zip(fn[2], map(ev, args))))
+            return self.evaluate(fn[3], bound, saved)
+        if op == '<': return ev(args[0]) < ev(args[1])
+        if op == '>': return ev(args[0]) > ev(args[1])
         if op == 'read-setting': return saved.get(ev(args[0]), 'unset')
         if op == 'setting-def': return saved.get(ev(args[0]), 1.0)
         if op == 'eeprom-store-f':

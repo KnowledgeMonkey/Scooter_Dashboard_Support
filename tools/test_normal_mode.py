@@ -43,7 +43,6 @@ class NormalModeTests(unittest.TestCase):
             return result
         if op == 'var': local[args[0]] = ev(args[1]); return local[args[0]]
         if op == 'set': self.state[ev(args[0])] = ev(args[1]); return self.state[ev(args[0])]
-        if op in ['min', 'max']: return (min if op == 'min' else max)(map(ev, args))
         binary = {'+': operator.add, '-': operator.sub, '*': operator.mul, '/': operator.truediv,
                   '>': operator.gt, '<': operator.lt, '<=': operator.le, 'eq': operator.eq}
         if op in binary: return binary[op](ev(args[0]), ev(args[1]))

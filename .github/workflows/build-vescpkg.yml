@@ -29,6 +29,17 @@ jobs:
           python3 tools/check_lisp.py scooter_support.lisp
           python3 -m unittest discover -s tools -p "test_*.py"
 
+      - name: Checkout LispBM startup test runner
+        uses: actions/checkout@v4
+        with:
+          repository: svenssonjoel/lispBM
+          ref: 78a68368712819243864d4291dea8ae9188ae611
+          path: tools/lispbm-runner
+      - name: Build LispBM startup test runner
+        run: make -C tools/lispbm-runner/tests test_lisp_code_cps_64
+      - name: Exercise settings startup in LispBM
+        run: python3 tools/check_startup.py tools/lispbm-runner/tests/test_lisp_code_cps_64
+
       - name: Prepare runtime paths
         run: |
           echo "XDG_RUNTIME_DIR=${RUNNER_TEMP}/xdg-runtime" >> "$GITHUB_ENV"
