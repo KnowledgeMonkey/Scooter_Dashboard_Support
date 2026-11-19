@@ -487,6 +487,54 @@ Item {
         return v > 0 ? v * stMotors : stWattPeak
     }
 
+    property double lastSample: 0
+    property double toolsClock: 0
+    readonly property bool freshSample: lastSample > 0 && toolsClock - lastSample < 2500
+    property real liveThreshold: -1
+    property bool belowStart: false
+    property bool outputDisabled: false
+    property int sampleCount: 0
+    property real fastest: 0
+    property real peakDraw: 0
+    property real peakRegen: 0
+    property real lowestVoltage: 0
+    property var faultHistory: []
+    property int previousFault: -1
+
+    function clearSession() {
+        sampleCount = 0
+        fastest = peakDraw = peakRegen = lowestVoltage = 0
+        faultHistory = []
+        previousFault = -1
+    }
+
+    function recordSample() {
+        lastSample = Date.now()
+        toolsClock = lastSample
+        fastest = Math.max(fastest, stSpeed)
+        peakDraw = Math.max(peakDraw, stWatts)
+        peakRegen = Math.max(peakRegen, -stWatts)
+        if (stVin > 0 && (!lowestVoltage || stVin < lowestVoltage)) lowestVoltage = stVin
+        if (stFault !== previousFault && (stFault || previousFault > 0)) {
+            var line = Qt.formatTime(new Date(), "hh:mm:ss") + "  " + (stFault ? faultName(stFault) : "Fault cleared")
+            faultHistory = [line].concat(faultHistory).slice(0, 12)
+        }
+        previousFault = stFault
+        sampleCount++
+    }
+
+    function shownSpeed(kmh) {
+        return (kmh * (useMph.checked ? mphFactor : 1)).toFixed(1) + (useMph.checked ? " mph" : " km/h")
+    }
+
+    Timer {
+        interval: 500
+        running: swipeView.currentIndex === 5
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.toolsClock = Date.now()
+    }
+
     function applyStateLine(line) {
         var p = line.split(" ")
         stOff = parseBoolToken(p[1])
@@ -516,6 +564,10 @@ Item {
         if (isNaN(stBmsTemp)) stBmsTemp = -100
         stUptime = Number.parseFloat(p[25]) || 0
         stTrip = (Number.parseFloat(p[26]) || 0) / 1000
+        liveThreshold = p.length >= 30 ? Number(p[27]) : -1
+        belowStart = parseBoolToken(p[28])
+        outputDisabled = parseBoolToken(p[29])
+        recordSample()
         if (Math.abs(stWatts) > stWattPeak)
             stWattPeak = Math.abs(stWatts)
     }
@@ -1704,10 +1756,10 @@ Item {
                 color: root.cWell
 
                 Rectangle {
-                    width: secTrack.width / 4
+                    width: secTrack.width / 5
                     height: parent.height
                     radius: parent.radius
-                    x: (swipeView.currentIndex - 1) * secTrack.width / 4
+                    x: (swipeView.currentIndex - 1) * secTrack.width / 5
                     color: root.cEdge
                     Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                 }
@@ -1715,14 +1767,17 @@ Item {
                 Row {
                     anchors.fill: parent
                     Repeater {
-                        model: ["General", "Modes", "Setup", "el sus"]
+                        model: ["General", "Modes", "Setup", "el sus", "Info"]
                         Item {
-                            width: secTrack.width / 4
+                            width: secTrack.width / 5
                             height: secTrack.height
                             Label {
                                 anchors.centerIn: parent
                                 text: modelData
                                 font.bold: true
+                                width: parent.width - 2
+                                horizontalAlignment: Text.AlignHCenter
+                                fontSizeMode: Text.Fit
                                 font.pointSize: root.titleSize * 0.95
                                 color: swipeView.currentIndex === index + 1 ? root.cInk : root.cDim2
                                 Behavior on color { ColorAnimation { duration: 200 } }
@@ -1757,7 +1812,7 @@ Item {
                 Timer {
                     interval: 40
                     repeat: true
-                    running: swipeView.currentIndex === 0 && !root.isSlave
+                    running: (swipeView.currentIndex === 0 || swipeView.currentIndex === 5) && !root.isSlave
                     onTriggered: {
                         var now = Date.now()
                         if (!root.statePending || (now - root.statePendingSince) > 700) {
@@ -3990,6 +4045,72 @@ Item {
                     }
                 }
             }
+            Page {
+                ScrollView {
+                    id: infoScroll
+                    anchors.fill: parent
+                    contentWidth: availableWidth
+                    clip: true
+                    ColumnLayout {
+                        width: infoScroll.availableWidth
+                        spacing: 6
+                        Label { text: "Connection"; font.bold: true }
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            text: root.settingsLoaded ? "All " + root.settingsSeenCount + " settings groups received"
+                                : !root.settingsSeenCount ? "Waiting for controller"
+                                : root.settingsSeenCount + "/" + root.settingsMsgs.length + " received · waiting for " +
+                                  root.settingsMsgs.filter(function(k) { return !root.settingsSeen[k] }).join(", ")
+                        }
+                        Button { visible: !root.settingsLoaded; enabled: !root.saving; text: "Retry settings"; onClicked: root.getSettings() }
+                        Label { text: "Drive status"; font.bold: true }
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            text: root.isSlave ? "Slave controller" : !root.freshSample ? "Waiting for live telemetry"
+                                : (root.stSecret ? "Secret" : "Normal") + " · " + root.shownSpeed(root.stSpeed) + "\n" +
+                                  (root.stFault ? root.faultName(root.stFault) : root.stOff ? "Power off" : root.stLock ? "Locked"
+                                   : root.liveThreshold < 0 ? "Output status unavailable" : root.belowStart ? "Below start speed"
+                                   : root.outputDisabled ? "Output disabled" : root.stCruise ? "Cruise active" : "Output enabled") +
+                                  (root.liveThreshold >= 0 ? " · Start at " + root.shownSpeed(root.liveThreshold) : "")
+                        }
+                        Label { text: root.cfgDirty ? "Profile comparison · unsaved edits" : "Profile comparison"; font.bold: true }
+                        Repeater {
+                            model: root.settingsLoaded ? [
+                                ["", "Normal", "Secret"],
+                                ["Start " + (useMph.checked ? "mph" : "km/h"), minSpeed.text, secretMinSpeed.text],
+                                ["Ramp", Number(normalRampTime.text) > 0 ? normalRampTime.text + " s" : "Off", "Off"],
+                                ["Allow cruise", cruiseEnable.checked && normalCruiseAllow.checked ? "Yes" : "No", cruiseEnable.checked ? "Yes" : "No"],
+                                ["Eco " + (useMph.checked ? "mph" : "km/h"), applySpeed.checked ? ecoSpeed.text : "—", applySpeed.checked ? secretEcoSpeed.text : "—"],
+                                ["Eco " + "%", applyCurrent.checked ? ecoCurrent.text : "—", applyCurrent.checked ? secretEcoCurrent.text : "—"],
+                                ["Eco " + "W", applyWatts.checked ? ecoWatts.text : "—", applyWatts.checked ? secretEcoWatts.text : "—"],
+                                ["Drive " + (useMph.checked ? "mph" : "km/h"), applySpeed.checked ? driveSpeed.text : "—", applySpeed.checked ? secretDriveSpeed.text : "—"],
+                                ["Drive " + "%", applyCurrent.checked ? driveCurrent.text : "—", applyCurrent.checked ? secretDriveCurrent.text : "—"],
+                                ["Drive " + "W", applyWatts.checked ? driveWatts.text : "—", applyWatts.checked ? secretDriveWatts.text : "—"],
+                                ["Sport " + (useMph.checked ? "mph" : "km/h"), applySpeed.checked ? sportSpeed.text : "—", applySpeed.checked ? secretSportSpeed.text : "—"],
+                                ["Sport " + "%", applyCurrent.checked ? sportCurrent.text : "—", applyCurrent.checked ? secretSportCurrent.text : "—"],
+                                ["Sport " + "W", applyWatts.checked ? sportWatts.text : "—", applyWatts.checked ? secretSportWatts.text : "—"]
+                            ] : []
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label { Layout.fillWidth: true; Layout.preferredWidth: 2; text: modelData[0]; wrapMode: Text.WordWrap }
+                                Label { Layout.fillWidth: true; Layout.preferredWidth: 1; text: modelData[1] }
+                                Label { Layout.fillWidth: true; Layout.preferredWidth: 1; text: modelData[2] }
+                            }
+                        }
+                        Label { text: "Session readings"; font.bold: true }
+                        Label {
+                            text: !root.sampleCount ? "No samples yet" : "Top speed  " + root.shownSpeed(root.fastest) +
+                                "\nPeak draw  " + root.peakDraw + " W    Regen  " + root.peakRegen + " W" +
+                                "\nLowest voltage  " + (root.lowestVoltage ? root.lowestVoltage.toFixed(1) + " V" : "—")
+                        }
+                        Label { text: "Recent faults"; font.bold: true }
+                        Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: root.faultHistory.join("\n") || "None observed this session" }
+                        Button { text: "Clear session readings"; enabled: root.sampleCount > 0; onClicked: root.clearSession() }
+                    }
+                }
+            }
         }
 
         RowLayout {
@@ -3997,7 +4118,7 @@ Item {
             Layout.topMargin: 4
             Layout.bottomMargin: 2
             spacing: 8
-            visible: swipeView.currentIndex !== 0
+            visible: swipeView.currentIndex !== 0 && swipeView.currentIndex !== 5
 
             Repeater {
                 model: [

@@ -124,6 +124,12 @@ Lock, mode switching, headlight, secret mode and leaving secret mode are fully r
   greys out and stops responding rather than sitting there coloured
 - Buttons for power, lock/unlock, headlight, secret, cruise and mode selection
 
+### Dashboard Info
+
+Open the gear and select **Info** to see which settings groups have arrived, retry a partial load, or check the active profile, output state and start threshold. The Normal/Secret comparison shows the values in the editor, including unsaved edits. A dash means the package does not apply that limit.
+
+While Control or Info is open, the app records sampled top speed, peak battery draw and regen, minimum positive battery voltage, and the last 12 fault transitions. Clear the session to start a new set of readings. Short events between samples can be missed.
+
 ### 🔗 Third-party app support
 **NineDash**, **m365 Tools** and the **official Segway Ninebot app** connect over the
 dashboard's own BLE module, so no extra hardware or wiring is needed. Tested on a G30,

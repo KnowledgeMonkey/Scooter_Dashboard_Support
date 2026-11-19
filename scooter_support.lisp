@@ -844,7 +844,10 @@
             (str-from-n (secs-since app-boot-time) "%.0f ")
             ; the UI took this off the firmware's own tachometer, which does not
             ; know the dash was switched on - it has to come from here to reset
-            (str-from-n cur-trip "%d")
+            (str-from-n cur-trip "%d ")
+            (str-from-n (active-start-speed) "%.2f ")
+            (tf (< cur-speed-kmh (active-start-speed)))
+            (tf (app-is-output-disabled))
         ))
     )
 )
