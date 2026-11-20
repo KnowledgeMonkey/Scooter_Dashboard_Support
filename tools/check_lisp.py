@@ -27,7 +27,7 @@ str-merge str-from-n str-part str-split str-replace str-to-i str-to-f str-len
 str-cmp to-str to-str-delim str-find num-eq
 print puts sleep systime secs-since time-now timeout-reset
 abs sin cos tan asin acos atan atan2 pow exp sqrt log log10 deg2rad rad2deg
-floor ceil round min max
+floor ceil round
 gpio-configure gpio-write gpio-read
 uart-start uart-stop uart-write uart-read uart-read-bytes uart-read-until
 can-start can-scan can-send-sid can-send-eid can-recv-sid can-recv-eid

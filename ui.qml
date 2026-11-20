@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "start", "normal"]
 
     function markSettingsSeen(key) {
         if (settingsMsgs.indexOf(key) < 0 || settingsSeen[key])
@@ -828,7 +828,7 @@ Item {
     function convertSpeedFields(toMiles) {
         var factor = toMiles ? mphFactor : (1 / mphFactor)
         var fs = [ecoSpeed, driveSpeed, sportSpeed, secretEcoSpeed, secretDriveSpeed,
-            secretSportSpeed, minSpeed, buttonSpeed, cruiseDeviation, cruiseMinSpeed,
+            secretSportSpeed, minSpeed, secretMinSpeed, buttonSpeed, cruiseDeviation, cruiseMinSpeed,
             cruiseMaxSpeed, alarmSpeedThreshold]
         for (var i = 0; i < fs.length; i++) {
             var n = Number.parseFloat(fs[i].text.replace(",", "."))
@@ -854,7 +854,7 @@ Item {
 
         saveGroup("general", [boolAtom(softwareAdc), boolAtom(softwareAdc2),
             boolAtom(showBatteryInIdle), boolAtom(showBatterySecret),
-            readSpeed(minSpeed, 1), boolAtom(appEnable), idleDisplay.currentIndex])
+            Math.max(0, readSpeed(minSpeed, 1)), boolAtom(appEnable), idleDisplay.currentIndex])
 
         saveGroup("temps", [readTemp(tempWarningMotor, 1), readTemp(tempWarningFet, 1),
             readTemp(bmsTempHi, 1), readTemp(bmsTempLo, 1)])
@@ -892,6 +892,11 @@ Item {
         saveGroup("alarm", [boolAtom(alarmTone), readSpeed(alarmSpeedThreshold, 1),
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
+        saveGroup("normal", [Math.max(0, Math.min(10, readReal(normalRampTime, 2))), boolAtom(normalCruiseAllow)])
+        saveGroup("start", [Math.max(0, readSpeed(secretMinSpeed, 1))])
+        saveGroup("sound", [boolAtom(profileChangeBeep)])
+        saveGroup("beeps", [boolAtom(powerOnBeep), boolAtom(powerOffBeep), boolAtom(lockBeep), boolAtom(unlockBeep), boolAtom(lockedButtonBeep), boolAtom(cruiseStartBeep), boolAtom(cruiseStopBeep), boolAtom(cruiseToggleBeep), boolAtom(findBeep)])
+
         queueCode("(finish-settings-save)")
 
         // Model change needs a lisp restart, ack-gated via "model-ok"
@@ -922,7 +927,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "start", "normal"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -995,6 +1000,23 @@ Item {
             setSpeed(minSpeed, parts[5], 1)
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
+        } else if (parts[0] === "normal") {
+            setReal(normalRampTime, parts[1], 2)
+            normalCruiseAllow.checked = parseBoolToken(parts[2])
+        } else if (parts[0] === "start") {
+            setSpeed(secretMinSpeed, parts[1], 1)
+        } else if (parts[0] === "sound") {
+            profileChangeBeep.checked = parseBoolToken(parts[1])
+        } else if (parts[0] === "beeps") {
+            powerOnBeep.checked = parseBoolToken(parts[1])
+            powerOffBeep.checked = parseBoolToken(parts[2])
+            lockBeep.checked = parseBoolToken(parts[3])
+            unlockBeep.checked = parseBoolToken(parts[4])
+            lockedButtonBeep.checked = parseBoolToken(parts[5])
+            cruiseStartBeep.checked = parseBoolToken(parts[6])
+            cruiseStopBeep.checked = parseBoolToken(parts[7])
+            cruiseToggleBeep.checked = parseBoolToken(parts[8])
+            findBeep.checked = parseBoolToken(parts[9])
         } else if (parts[0] === "temps") {
             setTemp(tempWarningMotor, parts[1], 1)
             setTemp(tempWarningFet, parts[2], 1)
@@ -1661,10 +1683,10 @@ Item {
                 color: root.cWell
 
                 Rectangle {
-                    width: secTrack.width / 3
+                    width: secTrack.width / 4
                     height: parent.height
                     radius: parent.radius
-                    x: (swipeView.currentIndex - 1) * secTrack.width / 3
+                    x: (swipeView.currentIndex - 1) * secTrack.width / 4
                     color: root.cEdge
                     Behavior on x { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                 }
@@ -1672,9 +1694,9 @@ Item {
                 Row {
                     anchors.fill: parent
                     Repeater {
-                        model: ["General", "Modes", "Setup"]
+                        model: ["General", "Modes", "Setup", "Sounds"]
                         Item {
-                            width: secTrack.width / 3
+                            width: secTrack.width / 4
                             height: secTrack.height
                             Label {
                                 anchors.centerIn: parent
@@ -2565,6 +2587,8 @@ Item {
                                 }
                                 Label { text: "The mode the scooter starts in when the VESC is turned on."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
+
+
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 40
@@ -2575,10 +2599,24 @@ Item {
                                 Label { text: "Locking the scooter drops it back out of the secret modes."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
                                 RowLayout {
+                                    enabled: softwareAdc.checked
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 40
-                                    Label { font.bold: true; text: "Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
+                                    Label { font.bold: true; text: "Legal Acceleration Ramp (s)"; Layout.fillWidth: true }
+                                    TextField { font.pointSize: root.titleSize * 0.95; id: normalRampTime; horizontalAlignment: TextInput.AlignHCenter; Layout.preferredWidth: 100; maximumLength: 7; inputMethodHints: Qt.ImhFormattedNumbersOnly; topPadding: 0; bottomPadding: 0; leftPadding: 6; rightPadding: 6; verticalAlignment: TextInput.AlignVCenter; background: Rectangle { radius: 10; implicitHeight: 34; color: parent.enabled ? root.cCtl : root.cCard } }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Legal Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
                                     TextField { font.pointSize: root.titleSize * 0.95; id: minSpeed; horizontalAlignment: TextInput.AlignHCenter; Layout.preferredWidth: 100; maximumLength: 7; inputMethodHints: Qt.ImhFormattedNumbersOnly; topPadding: 0; bottomPadding: 0; leftPadding: 6; rightPadding: 6; verticalAlignment: TextInput.AlignVCenter; background: Rectangle { radius: 10; implicitHeight: 34; color: parent.enabled ? root.cCtl : root.cCard } }
+                                }
+                                RowLayout {
+                                    enabled: secretEnabled.checked
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Secret Start Speed (" + (useMph.checked ? "mph" : "km/h") + ")"; Layout.fillWidth: true }
+                                    TextField { font.pointSize: root.titleSize * 0.95; id: secretMinSpeed; horizontalAlignment: TextInput.AlignHCenter; Layout.preferredWidth: 100; maximumLength: 7; inputMethodHints: Qt.ImhFormattedNumbersOnly; topPadding: 0; bottomPadding: 0; leftPadding: 6; rightPadding: 6; verticalAlignment: TextInput.AlignVCenter; background: Rectangle { radius: 10; implicitHeight: 34; color: parent.enabled ? root.cCtl : root.cCard } }
                                 }
                                 Label { text: "Kick-off speed. Throttle will not work below this value."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
@@ -2632,6 +2670,8 @@ Item {
 
                             }
                         }
+
+
                         Label { text: "Lights"; font.bold: true; font.pointSize: root.titleSize * 0.92; font.capitalization: Font.AllUppercase; font.letterSpacing: 1; opacity: 0.8; Layout.topMargin: 26; Layout.leftMargin: 4 }
                         Rectangle {
                             Layout.fillWidth: true
@@ -3598,6 +3638,13 @@ Item {
                                         Label { font.bold: true; text: "Cruise Control"; Layout.fillWidth: true }
                                         CheckBox { id: cruiseEnable; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
                                     }
+                                    RowLayout {
+                                        enabled: cruiseEnable.checked
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 40
+                                        Label { font.bold: true; text: "Allow Cruise in Legal Mode"; Layout.fillWidth: true }
+                                        CheckBox { id: normalCruiseAllow; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                    }
                                     Label { text: "Enables the use of Cruise Control. Can be quickly toggled on the dash."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: -6 }
 
                                     RowLayout {
@@ -3727,6 +3774,114 @@ Item {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Page {
+                enabled: !isSlave
+                ScrollView {
+                    id: soundsScroll
+                    anchors.fill: parent
+                    contentWidth: availableWidth
+                    contentHeight: soundsCol.implicitHeight
+                    clip: true
+                    Component.onCompleted: contentItem.boundsBehavior = Flickable.StopAtBounds
+                    ColumnLayout {
+                        id: soundsCol
+                        width: soundsScroll.availableWidth
+                        spacing: 4
+                        Label { text: "Sounds"; font.bold: true; font.pointSize: root.titleSize * 0.92; Layout.topMargin: 12; Layout.leftMargin: 4 }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: soundsCard.implicitHeight + 28
+                            radius: 14
+                            color: root.cDeep
+                            border.width: root.darkUi ? 0 : 1
+                            border.color: root.cEdge
+                            ColumnLayout {
+                                id: soundsCard
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 14
+                                spacing: 4
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Profile Change Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: profileChangeBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Power On Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: powerOnBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Power Off Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: powerOffBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Lock Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: lockBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Unlock Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: unlockBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Locked Button Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: lockedButtonBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Cruise Start Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: cruiseStartBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Cruise Stop Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: cruiseStopBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Cruise Switch Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: cruiseToggleBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 40
+                                    Label { font.bold: true; text: "Find My Scooter Beep"; Layout.fillWidth: true }
+                                    CheckBox { id: findBeep; checked: true; spacing: 4; padding: 7; indicator: Rectangle { implicitWidth: 40; implicitHeight: 22; x: parent.leftPadding; y: parent.height / 2 - height / 2; radius: 11; color: parent.checked ? root.cAccentBg : root.cTrack; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } Rectangle { y: 3; width: 16; height: 16; radius: 8; color: parent.parent.checked ? root.cAccent : root.cDim2; x: parent.parent.checked ? 21 : 3; Behavior on color { ColorAnimation { duration: 140 } } Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } } } } }
+                                }
+
+
+
                             }
                         }
                     }
@@ -3864,17 +4019,7 @@ Item {
                 return
             }
 
-            if (message.startsWith("model ")
-                    || message.startsWith("general ")
-                    || message.startsWith("temps ")
-                    || message.startsWith("modes ")
-                    || message.startsWith("secret ")
-                    || message.startsWith("apply ")
-                    || message.startsWith("gesture ")
-                    || message.startsWith("misc ")
-                    || message.startsWith("rear ")
-                    || message.startsWith("cruise ")
-                    || message.startsWith("alarm ")) {
+            if (settingsMsgs.indexOf(message.split(" ")[0]) >= 0) {
                 applySettingsLine(message)
             } else if (message === "model-ok") {
                 root.stepDone()

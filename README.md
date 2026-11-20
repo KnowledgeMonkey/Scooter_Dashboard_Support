@@ -74,6 +74,7 @@ One package for everything - the model is stored on the ESC and selected in the 
   at all. One switch covers normal and secret together, and anything switched off is left
   exactly as VESC has it - so you can keep your own field weakening setup
 - Selectable startup mode, restored every time the dashboard is switched on
+- The **Sounds** tab has saved switches for profile changes, power on/off, lock/unlock, locked button presses, cruise start/stop/switching, and Find My Scooter. The G2 horn and alarm keep their original behavior. These switches cover sounds requested by this package; sounds produced independently by dashboard firmware are unchanged.
 
 ### 🎛️ Gestures
 Lock, mode switching, headlight, secret mode and leaving secret mode are fully remappable:
@@ -105,6 +106,7 @@ Lock, mode switching, headlight, secret mode and leaving secret mode are fully r
 - **Cancels on any throttle or brake press** and your live lever takes over the same instant.
   It does not cancel on speed alone, so a bumpy road or traction control cannot drop it
 - Arms only inside a configurable **min/max speed window** (default 5 - 100 km/h)
+- **Allow Cruise in Legal Mode** in Setup independently blocks normal-profile cruise. Secret-profile cruise still follows the master switch. Returning to a blocked normal profile cancels an active cruise hold.
 - The Setup switch is a **master switch**: with it off, cruise cannot be turned on from the
   Control tab, an app or a gesture
 
@@ -176,7 +178,8 @@ including pairing.
 - **Light compensation** - the headlight sags throttle/brake voltage non-linearly, so this
   applies an affine correction (offset + gain) rather than a flat offset. A guided wizard in
   Setup measures it. The motor stays disengaged throughout, so **no stand is needed**
-- **Motor start speed** (kick-start)
+- **Legal Acceleration Ramp (s)** in General smooths only rising dashboard throttle in normal profiles (0 disables it; up to 10 seconds from zero to full demand). Throttle release and braking bypass the ramp. It uses the ADC throttle mapping, preserves the configured current-control mode, and is unavailable with a throttle wired directly to the ADC pin. It arms after the released dashboard throttle is observed for 0.2 seconds with the supported ADC control type and an increasing voltage mapping. Existing VESC ramp/expo settings still apply.
+- **Motor start speed** (kick-start): separate Legal Start Speed and Secret Start Speed in General. The active profile selects the threshold; both initially retain the previously shared value on upgrade.
 
 ### 🔌 Dashboard power control
 - **ADC1** or **ADC2** switches the dashboard's supply through a MOSFET: **3.3 V on the
