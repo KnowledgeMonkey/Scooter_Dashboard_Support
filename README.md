@@ -181,7 +181,7 @@ including pairing.
 - **Light compensation** - the headlight sags throttle/brake voltage non-linearly, so this
   applies an affine correction (offset + gain) rather than a flat offset. A guided wizard in
   Setup measures it. The motor stays disengaged throughout, so **no stand is needed**
-- **Motor start speed** (kick-start)
+- **Legal Start Speed** and **Secret Start Speed** in General set the kick-start threshold for each profile. Both inherit the previous shared value on upgrade.
 
 ### 🔌 Dashboard power control
 - **ADC1** or **ADC2** switches the dashboard's supply through a MOSFET: **3.3 V on the

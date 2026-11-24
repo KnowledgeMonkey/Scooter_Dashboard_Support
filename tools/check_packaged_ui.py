@@ -51,6 +51,13 @@ Item {
                     active = next
                 }
                 if (!speedVisible) throw new Error("Speed dial did not appear")
+                const previous = "vss-settings 1\\ngeneral true true false false 5 false 0"
+                dashboard.cfgImport(previous)
+                if (dashboard.cfgLines.start !== "start 5")
+                    throw new Error("Shared start speed did not migrate from backup")
+                dashboard.cfgImport(previous + "\\nstart 0")
+                if (dashboard.cfgLines.start !== "start 0")
+                    throw new Error("Separate secret start speed was lost")
                 console.log("PACKAGE_DIAL_VISIBLE")
             } catch (e) { console.error(e) }
             Qt.quit()

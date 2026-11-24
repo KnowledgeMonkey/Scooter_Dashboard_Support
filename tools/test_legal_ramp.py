@@ -25,8 +25,21 @@ def program(source, saved):
 '''
     assertions = '''
 (load-settings)
+(def previous-speed (setting-def 'min-speed-kmh))
+(def default-ok (and (= legal-ramp-seconds 1.0) (= min-speed previous-speed)
+                     (= secret-start-speed previous-speed)))
+(write-setting 'min-speed-kmh 6.0)
+(load-settings)
+(def independent-ok (and (= min-speed 6.0) (= secret-start-speed previous-speed)))
+(save-group 'start '(0.0))
+(load-settings)
+(set 'unlock true)
+(def secret-at-zero (start-speed-reached 0.0))
+(set 'unlock false)
+(def boundary-ok (and (not (start-speed-reached 5.9)) (start-speed-reached 6.0)))
+(save-group 'start '(3.0))
+(set 'received nil)
 (send-settings)
-(def default-ok (= legal-ramp-seconds 1.0))
 (def expected (cons 'model (map first setting-groups)))
 (def actual (map (lambda (line) (read (first (str-split line " ")))) (reverse received)))
 (def loaded-ok (eq actual expected))
@@ -89,16 +102,16 @@ def program(source, saved):
 ; Mode switching while the lever stays held.
 (toggle-secret)
 (frame 220 60 0.1)
-(def secret-ok (and (near adc1 (/ 220 77.2)) (= feedback 0)))
+(def secret-ok (and (not (start-speed-reached 2.9)) (start-speed-reached 3.0) (near adc1 (/ 220 77.2)) (= feedback 0)))
 (toggle-secret)
 (frame 220 60 0.05)
-(def back-ok (and (> adc1 1.0) (<= adc1 1.101)))
+(def back-ok (and (not (start-speed-reached 3.0)) (> adc1 1.0) (<= adc1 1.101)))
 (frame 220 60 2.0)
 (def gap-ok (near adc1 1.1))
 (set 'legal-ramp-seconds 0.0)
 (frame 220 60 0.1)
 (def bypass-ok (near adc1 (/ 220 77.2)))
-(check (and persisted-ok rising-ok full-ok release-ok brake-ok kick-ok range-ok
+(check (and independent-ok secret-at-zero boundary-ok persisted-ok rising-ok full-ok release-ok brake-ok kick-ok range-ok
             secret-ok back-ok gap-ok bypass-ok))
 '''
     return mocks + source + assertions

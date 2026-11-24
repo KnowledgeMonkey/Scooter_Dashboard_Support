@@ -13,7 +13,8 @@
 (def idle-display 0) ; 0 battery %, 1 battery V, 2 controller C, 3 motor C
 (def last-alarm-code 0) ; the code the app reads back after an alarm has cleared
 (def show-batt-idle-secret false) ; same but in secret modes
-(def min-speed 1) ; minimum speed in km/h to enable throttle and brake
+(def min-speed 1) ; legal kick-start speed, km/h
+(def secret-start-speed 1)
 (def legal-ramp-seconds 1.0)
 (def ramp-level 0.0)
 (def ramp-tick (systime))
@@ -356,6 +357,7 @@
     (bms-temp-lo 98 f 0.0)
     (show-batt-in-idle 6 b false)
     (min-speed-kmh 7 f 1.0)
+    (secret-start-kmh 115 f 1.0)
     (legal-ramp-seconds 114 f 1.0)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5)
@@ -483,6 +485,7 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (start secret-start-kmh)
     (ramp legal-ramp-seconds)
     (sound profile-change-beep)
     (beeps power-on-beep power-off-beep lock-beep unlock-beep locked-button-beep cruise-start-beep cruise-stop-beep cruise-toggle-beep horn-beep find-beep alarm-beep)
@@ -490,7 +493,7 @@
 
 ; stored in km/h, kept at runtime in m/s or under another name - load-settings
 ; converts these by hand instead of copying them straight across
-(def speed-settings '(min-speed-kmh button-speed-kmh eco-speed-kmh drive-speed-kmh
+(def speed-settings '(min-speed-kmh secret-start-kmh button-speed-kmh eco-speed-kmh drive-speed-kmh
     sport-speed-kmh secret-eco-speed-kmh secret-drive-speed-kmh secret-sport-speed-kmh))
 
 (def last-button-state false)
@@ -587,6 +590,12 @@
         ; these divide, so an unwritten slot has to come back as its default and
         ; not as nil - setting-def is what guarantees that
         (set 'min-speed (setting-def 'min-speed-kmh))
+        (if (< min-speed 0) (set 'min-speed 0.0))
+        ; Snapshot the old shared value once, even when it equals the table default.
+        (if (eq (read-setting 'secret-start-kmh) 'unset)
+            (eeprom-store-f (first (assoc setting-defs 'secret-start-kmh)) min-speed))
+        (set 'secret-start-speed (setting-def 'secret-start-kmh))
+        (if (< secret-start-speed 0) (set 'secret-start-speed 0.0))
         (if (not (and (>= legal-ramp-seconds 0.0) (<= legal-ramp-seconds 10.0)))
             (set 'legal-ramp-seconds 0.0))
         (reset-legal-ramp)
@@ -1082,6 +1091,10 @@
 (defun calib-start-thr() (calib-start-channel 'thr))
 (defun calib-start-brk() (calib-start-channel 'brk))
 
+(defun start-speed-reached (speed-kmh)
+    (>= speed-kmh (if unlock secret-start-speed min-speed))
+)
+
 (defun reset-legal-ramp ()
     { (set 'ramp-level 0.0) (set 'ramp-ready false) (set 'ramp-rest-since nil) }
 )
@@ -1112,7 +1125,7 @@
             (return throttle)
         })
         (if (<= throttle start) { (set 'ramp-level 0.0) (return throttle) })
-        (if (or off lock (not (eq calib-stage 'idle)) (< cur-speed-kmh min-speed)
+        (if (or off lock (not (eq calib-stage 'idle)) (not (start-speed-reached cur-speed-kmh))
                 (> (get-adc-decoded 1) adc-touch)
                 (and software-adc2 (> brake (conf-get 'adc-v2-start))))
             { (set 'ramp-level 0.0) (return start) })
@@ -1308,7 +1321,7 @@
                     }
                     ; also never below the kick-start speed - output is disabled
                     ; down there, so cruise would arm against a dead motor
-                    (if (and (not cruise-blocked) (>= speed-kmh min-speed)
+                    (if (and (not cruise-blocked) (start-speed-reached speed-kmh)
                              (>= speed-kmh cruise-min-speed) (<= speed-kmh cruise-max-speed))
                         {
                             (if (> (abs (- speed-kmh cruise-ref)) cruise-deviation) {
@@ -1382,7 +1395,7 @@
 
         (trap (handle-cruise current-speed)) ; experimental - never let it break the loop
 
-        (if (or off lock (< current-speed min-speed))
+        (if (or off lock (not (start-speed-reached current-speed)))
             (if (not (app-is-output-disabled)) ; Disable output when scooter is turned off
                 {
                     (app-adc-override 0 0)
