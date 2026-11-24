@@ -172,6 +172,10 @@ including pairing.
   compensation calibration has to be run again
 
 ### 🎚️ Throttle & brake
+- **Legal Throttle Ramp (s)** beside Start Speed sets the time from idle to full dashboard
+  throttle in normal Eco, Drive and Sport. Default 1 second; 0 disables it (maximum 10).
+  It arms on a released lever with the recommended ADC2 brake setup and increasing throttle
+  voltage. Lowering the throttle is immediate. Secret profiles and pin throttle bypass it.
 - **Software ADC** per channel - take throttle from the dashboard and leave brake on a lever
   wired to the ADC pin, or the other way round
 - **Light compensation** - the headlight sags throttle/brake voltage non-linearly, so this

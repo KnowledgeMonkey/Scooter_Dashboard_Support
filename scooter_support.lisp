@@ -14,6 +14,11 @@
 (def last-alarm-code 0) ; the code the app reads back after an alarm has cleared
 (def show-batt-idle-secret false) ; same but in secret modes
 (def min-speed 1) ; minimum speed in km/h to enable throttle and brake
+(def legal-ramp-seconds 1.0)
+(def ramp-level 0.0)
+(def ramp-tick (systime))
+(def ramp-ready false)
+(def ramp-rest-since nil)
 (def button-safety-speed (/ 0.1 3.6)) ; disabling button above 0.1 km/h (due to safety reasons)
 
 ; Alarm parameters (foc-play-tone)
@@ -351,6 +356,7 @@
     (bms-temp-lo 98 f 0.0)
     (show-batt-in-idle 6 b false)
     (min-speed-kmh 7 f 1.0)
+    (legal-ramp-seconds 114 f 1.0)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5)
     (alarm-gyro-threshold 10 f 10.0)
@@ -477,6 +483,7 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (ramp legal-ramp-seconds)
     (sound profile-change-beep)
     (beeps power-on-beep power-off-beep lock-beep unlock-beep locked-button-beep cruise-start-beep cruise-stop-beep cruise-toggle-beep horn-beep find-beep alarm-beep)
 ))
@@ -580,6 +587,9 @@
         ; these divide, so an unwritten slot has to come back as its default and
         ; not as nil - setting-def is what guarantees that
         (set 'min-speed (setting-def 'min-speed-kmh))
+        (if (not (and (>= legal-ramp-seconds 0.0) (<= legal-ramp-seconds 10.0)))
+            (set 'legal-ramp-seconds 0.0))
+        (reset-legal-ramp)
         (set 'eco-speed (/ (setting-def 'eco-speed-kmh) 3.6))
         (set 'drive-speed (/ (setting-def 'drive-speed-kmh) 3.6))
         (set 'sport-speed (/ (setting-def 'sport-speed-kmh) 3.6))
@@ -1072,6 +1082,49 @@
 (defun calib-start-thr() (calib-start-channel 'thr))
 (defun calib-start-brk() (calib-start-channel 'brk))
 
+(defun reset-legal-ramp ()
+    { (set 'ramp-level 0.0) (set 'ramp-ready false) (set 'ramp-rest-since nil) }
+)
+
+(defunret legal-throttle (throttle brake)
+    {
+        (var dt (secs-since ramp-tick))
+        (set 'ramp-tick (systime))
+        (if (> dt 0.5) { (set 'ramp-level 0.0) (set 'ramp-rest-since nil) })
+        (var start (conf-get 'adc-v1-start))
+        (var end (conf-get 'adc-v1-end))
+        (var low (conf-get 'adc-v1-min))
+        (var high (conf-get 'adc-v1-max))
+        ; Leave the ADC app's range check and unsupported control types alone.
+        (if (or (!= (conf-get 'adc-ctrl-type) 8) (<= (- end start) 0.01)
+                (< start low) (> end high) (< throttle low) (> throttle high))
+            { (reset-legal-ramp) (return throttle) })
+
+        ; A low voltage must actually decode as a released throttle before arming.
+        (if (not ramp-ready) {
+            (if (or (> throttle (+ start (* adc-touch (- end start)))) off lock (not (eq calib-stage 'idle)))
+                (set 'ramp-rest-since nil)
+                (if (eq ramp-rest-since nil)
+                    (set 'ramp-rest-since (systime))
+                    (if (and (> (secs-since ramp-rest-since) 0.2)
+                             (<= (get-adc-decoded 0) adc-touch))
+                        (set 'ramp-ready true))))
+            (return throttle)
+        })
+        (if (<= throttle start) { (set 'ramp-level 0.0) (return throttle) })
+        (if (or off lock (not (eq calib-stage 'idle)) (< cur-speed-kmh min-speed)
+                (> (get-adc-decoded 1) adc-touch)
+                (and software-adc2 (> brake (conf-get 'adc-v2-start))))
+            { (set 'ramp-level 0.0) (return start) })
+
+        (var target (/ (- throttle start) (- end start)))
+        (if (> target 1.0) (setq target 1.0))
+        (var ceiling (+ ramp-level (/ (if (> dt 0.1) 0.1 dt) legal-ramp-seconds)))
+        (set 'ramp-level (if (< target ceiling) target ceiling))
+        (if (>= ramp-level target) throttle (+ start (* (- end start) ramp-level)))
+    }
+)
+
 ; lever frames - off shifts to the levers in a 0x61, and the enable test
 ; lives here so every caller does not have to repeat it
 (defunret adc-input (off)
@@ -1115,6 +1168,11 @@
         (if (> brake 3.3) (setq brake 3.3))
 
         (set 'thr-corr-v throttle) ; pre-mask - cruise release detection needs it
+
+        (if (and software-adc (not unlock) (> legal-ramp-seconds 0.0) (not cruising))
+            (setq throttle (legal-throttle throttle brake))
+            (if (or (> ramp-level 0.0) ramp-rest-since)
+                { (set 'ramp-level 0.0) (set 'ramp-rest-since nil) }))
 
         ; cruise capture-assist: hold the throttle signal at 0 from activation
         ; until the lever is physically released, so the app captures the speed

@@ -4,6 +4,8 @@ tools/*
 !tools/minify_lisp.py
 !tools/check_qml.py
 !tools/check_lisp.py
+!tools/check_packaged_ui.py
+!tools/test_legal_ramp.py
 !tools/pkg_readme.py
 !tools/pad_lisp.py
 !tools/svg_to_canvas.py
