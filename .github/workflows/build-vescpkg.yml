@@ -137,6 +137,9 @@ jobs:
           export PATH="$PWD/$VESC_TOOL_DIR/bin:$PATH"
           QT_QPA_PLATFORM=offscreen make clean all
 
+      - name: Open packaged AppUi in VESC Tool
+        run: python3 tools/check_packaged_ui.py "$VESC_TOOL_DIR/bin/vesc_tool" release.vescpkg
+
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
