@@ -197,7 +197,7 @@
 (def tap-left 0)
 (def tap-key -1) ; wait for neutral at startup and after interruptions
 (def tap-tick 0)
-(def brk-corr-v 0.0)
+(def brake-start-known false)
 (def lever-state 0)
 (def lever-since (systime))
 (def lever-armed true)
@@ -593,6 +593,8 @@
             (loopforeach n (cdr g)
                 (if (not (member n speed-settings))
                     (set n (let ((v (read-setting n))) (if (eq v 'unset) (eval n) v))))))
+        ; The optional raw brake threshold was added after the initial FW 7.00.
+        (setq brake-start-known (eq (first (trap (conf-get 'adc-v2-start))) 'exit-ok))
         (setq profile-taps (to-i profile-taps))
         (reset-profile-taps)
         ; An unrelated EEPROM value must describe 2-4 single controls to be usable.
@@ -1144,7 +1146,7 @@
         (if (<= throttle start) { (set 'ramp-level 0.0) (return throttle) })
         (if (or off lock (not (eq calib-stage 'idle)) (not (start-speed-reached cur-speed-kmh))
                 (> (get-adc-decoded 1) adc-touch)
-                (and software-adc2 (> brake (conf-get 'adc-v2-start))))
+                (and software-adc2 brake-start-known (> brake (conf-get 'adc-v2-start))))
             { (set 'ramp-level 0.0) (return start) })
 
         (var target (/ (- throttle start) (- end start)))
@@ -1197,7 +1199,6 @@
         (if (< brake 0.0) (setq brake 0.0))
         (if (> brake 3.3) (setq brake 3.3))
 
-        (setq brk-corr-v brake)
         (set 'thr-corr-v throttle) ; pre-mask - cruise release detection needs it
 
         (if (and software-adc (not unlock) (> legal-ramp-seconds 0.0) (not cruising))
@@ -2310,7 +2311,7 @@
              (or (not (or software-adc software-adc2)) (<= (secs-since last-rx) 0.5)))
         (profile-tap-sample (+ (if button 4 0)
             (if (if software-adc (> thr-corr-v (+ (conf-get 'adc-v1-start) 0.05)) (> lev-thr adc-touch)) 2 0)
-            (if (if software-adc2 (> brk-corr-v (+ (conf-get 'adc-v2-start) 0.05)) (> lev-brk adc-touch)) 1 0)))
+            (if (> lev-brk adc-touch) 1 0)))
         (reset-profile-taps)))
 
 (defun toggle-secret()

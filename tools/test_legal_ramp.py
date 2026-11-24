@@ -23,6 +23,13 @@ def program(source, saved):
 (def received nil)
 (defun send-data (value) (set 'received (cons value received)))
 '''
+    mocks += """(def raw-brake-supported true)
+(defun conf-get (key)
+    (if (and (eq key 'adc-v2-start) (not raw-brake-supported))
+        (exit-error 'unknown-parameter)
+        (assoc '((adc-ctrl-type . 8) (adc-v1-min . 0.3) (adc-v1-max . 3.1)
+                 (adc-v1-start . 1.0) (adc-v1-end . 3.0) (adc-v2-start . 1.0)) key)))
+"""
     assertions = '''
 (load-settings)
 (def previous-speed (setting-def 'min-speed-kmh))
@@ -57,13 +64,10 @@ def program(source, saved):
 (def adc2 -1.0)
 (def button 0)
 (def rest-decoded 0.0)
-(defun get-adc-decoded (ch) (if (= ch 0) rest-decoded 0.0))
+(defun get-adc-decoded (ch) (if (= ch 0) rest-decoded (if (> adc2 1.0) 1.0 0.0)))
 (defun app-adc-override (ch value)
     (cond ((= ch 0) (set 'adc1 value)) ((= ch 1) (set 'adc2 value))
           ((= ch 3) (set 'button value))))
-(defun conf-get (key) (assoc '((adc-ctrl-type . 8) (adc-v1-min . 0.3)
-    (adc-v1-max . 3.1) (adc-v1-start . 1.0) (adc-v1-end . 3.0)
-    (adc-v2-start . 1.0)) key))
 (defun configure-speed (a b c d e) t)
 (defun frame (thr brk dt) {
     (bufset-u8 uart-buf thr-idx thr)
@@ -120,10 +124,16 @@ def program(source, saved):
 (def taps-default-off (= profile-taps 0))
 (save-group 'taps '(1290i32)) ; throttle, brake, button, throttle
 (load-settings)
-(def taps-saved (= profile-taps 1290))
+(def taps-saved (and (= profile-taps 1290) brake-start-known))
+; Early 7.00 still provides the decoded ADC2 value. Exercise this version
+; for the rest of the moving tap tests, including frames with a rising throttle.
+(set 'raw-brake-supported false)
+(load-settings)
+(def early-700-ok (not brake-start-known))
 (defun sample (keys dt) {
     (frame (if (!= 0 (bitwise-and keys 2)) 165 60)
            (if (!= 0 (bitwise-and keys 1)) 165 60) dt)
+    (setq lev-brk (get-adc-decoded 1))
     (read-profile-taps (!= 0 (bitwise-and keys 4)))
 })
 (defun tap (key) { (sample key 0.12) (sample 0 0.12) })
@@ -225,7 +235,7 @@ def program(source, saved):
 (save-group 'taps '(0)) (load-settings)
 (def taps-off-again (= profile-taps 0))
 (check (and independent-ok secret-at-zero boundary-ok persisted-ok rising-ok full-ok release-ok brake-ok kick-ok range-ok
-            secret-ok back-ok gap-ok bypass-ok taps-default-off taps-saved moving-ok fires-once
+            secret-ok back-ok gap-ok bypass-ok taps-default-off taps-saved early-700-ok moving-ok fires-once
             wrong-order-ok overlap-ok gap-cancels long-cancels stale-cancels return-ok disabled-ok
             lock-pref-ok repeat-ok hold-ok button-ok solo-button-ok button-first-ok two-buttons-ok bad-code-ok taps-off-again))
 '''
@@ -245,7 +255,7 @@ def main():
             path = Path(directory) / f'{name}.lisp'
             path.write_text(program(source, saved))
             result = subprocess.run([str(runner), '-h', '100000', '-t', '10', str(path)],
-                                    text=True, capture_output=True, timeout=20)
+                                    text=True, errors="replace", capture_output=True, timeout=20)
             output = result.stdout + result.stderr
             # Upstream's test runner exit code is not a conventional pass/fail code.
             if '\nSUCCESS\n' not in output or 'Error:' in output:
