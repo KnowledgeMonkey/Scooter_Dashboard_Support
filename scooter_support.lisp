@@ -2263,10 +2263,16 @@
     })
 )
 
-(defun lever-mask (thr brk)
-    (+ (if (> brk adc-touch) 1 0) (if (> thr adc-touch) 2 0)))
-
-(defun held-combo (mask) (ix '(3 1 2 0) mask))
+; A ramped dashboard throttle can read idle at the motor while the lever is held.
+(defun gesture-levers (ordered-taps)
+    (if (and (or software-adc software-adc2) (> (secs-since last-rx) 0.5))
+        -1
+        (+ (if (> lev-brk adc-touch) 1 0)
+           (if (if (and software-adc (eq calib-stage 'idle)
+                        (or ordered-taps (and ramp-ready (not unlock) (> legal-ramp-seconds 0))))
+                   (> thr-corr-v (+ (conf-get 'adc-v1-start) 0.05))
+                   (> lev-thr adc-touch))
+               2 0))))
 
 (defun reset-profile-taps () { (setq tap-left 0) (setq tap-key -1) })
 
@@ -2286,7 +2292,7 @@
         (cond
             ((= mask 0) {
                 (var code (if (= tap-left 0) profile-taps tap-left))
-                (if (and (> tap-key 0) (= tap-key (bitwise-and code 7)))
+                (if (= tap-key (bitwise-and code 7))
                     {
                         (if (and (= tap-key 4) (> tap-left 0)) (claim-button))
                         (setq tap-left (shr code 3))
@@ -2305,14 +2311,12 @@
 })
 
 (defun read-profile-taps (button)
-    (if (and (not off) (eq calib-stage 'idle)
-             (if unlock (if secret-off-requires-lock lock (not lock))
-                 (and secret-enabled (or (not secret-requires-lock) lock)))
-             (or (not (or software-adc software-adc2)) (<= (secs-since last-rx) 0.5)))
-        (profile-tap-sample (+ (if button 4 0)
-            (if (if software-adc (> thr-corr-v (+ (conf-get 'adc-v1-start) 0.05)) (> lev-thr adc-touch)) 2 0)
-            (if (> lev-brk adc-touch) 1 0)))
-        (reset-profile-taps)))
+    (let ((mask (gesture-levers true)))
+        (if (and (>= mask 0) (not off) (eq calib-stage 'idle)
+                 (if unlock (eq secret-off-requires-lock lock)
+                     (and secret-enabled (or (not secret-requires-lock) lock))))
+            (profile-tap-sample (+ (if button 4 0) mask))
+            (reset-profile-taps))))
 
 (defun toggle-secret()
     {
@@ -2359,17 +2363,19 @@
 
 (defun lock-if-stopped () (if (at-standstill) (toggle-lock)))
 
-(defun gesture-action (n combo)
-    (cond
-        ((and unlock (= n secret-off-presses) (= combo secret-off-combo)
-              (if secret-off-requires-lock lock (not lock))) toggle-secret)
-        ((and secret-enabled (= n secret-presses) (= combo secret-combo)
-              (or (not secret-requires-lock) lock)) toggle-secret)
-        ((and (> n 0) (= n lock-presses) (= combo lock-combo)) lock-if-stopped)
-        ((and (= n mode-presses) (= combo mode-combo)
-              (if mode-requires-lock lock (not lock))) cycle-mode)
-        ((and (= n light-presses) (= combo light-combo)
-              (if light-requires-lock lock (not lock))) toggle-light)))
+(defun gesture-action (n mask)
+    (if (>= mask 0)
+        (let ((combo (ix '(3 1 2 0) mask)))
+            (cond
+                ((and unlock (= n secret-off-presses) (= combo secret-off-combo)
+                      (eq secret-off-requires-lock lock)) toggle-secret)
+                ((and secret-enabled (= n secret-presses) (= combo secret-combo)
+                      (or (not secret-requires-lock) lock)) toggle-secret)
+                ((and (> n 0) (= n lock-presses) (= combo lock-combo)) lock-if-stopped)
+                ((and (= n mode-presses) (= combo mode-combo)
+                      (eq mode-requires-lock lock)) cycle-mode)
+                ((and (= n light-presses) (= combo light-combo)
+                      (eq light-requires-lock lock)) toggle-light)))))
 
 (defun handle-button ()
     (if (and off (= presses 1))
@@ -2381,13 +2387,13 @@
             (apply-mode) ; Apply mode on start-up
             (stats-reset) ; reset stats when turning on
         }
-        (let ((action (gesture-action presses (held-combo (lever-mask lev-thr lev-brk)))))
+        (let ((action (gesture-action presses (gesture-levers false))))
             (if action (action) (if (and lock locked-button-beep) (setq feedback 1))))))
 
 ; Zero-press gestures still require the original half-second hold and a release to re-arm.
 (defun handle-lever-gestures()
     {
-        (var state (lever-mask lev-thr lev-brk))
+        (var state (gesture-levers false))
         (if (!= state lever-state) {
             (set 'lever-state state)
             (set 'lever-since (systime))
@@ -2395,7 +2401,7 @@
         (if (= state 0) (set 'lever-armed true))
 
         (if (and lever-armed (> state 0) (> (secs-since lever-since) 0.5))
-            (let ((action (gesture-action 0 (held-combo state))))
+            (let ((action (gesture-action 0 state)))
                 (if action { (setq lever-armed false) (action) }))
         )
     }
