@@ -81,7 +81,34 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps"]
+
+    // The low three bits hold the first tap. Keep the editable draft even
+    // when the rider temporarily changes the sequence length in the form.
+    property int tapCount: 0
+    property var tapSteps: [1, 0, 2, 1] // Throttle, Brake, Button, Throttle
+
+    function packTaps() {
+        var code = 0
+        for (var i = 0; i < tapCount; ++i)
+            code |= (1 << tapSteps[i]) << (3 * i)
+        return code
+    }
+
+    function loadTaps(code) {
+        var steps = [1, 0, 2, 1]
+        var count = 0
+        if (code > 0 && code < 4096 && [1, 2, 4].indexOf(code & 7) >= 0) {
+            while (code) {
+                var digit = [1, 2, 4].indexOf(code & 7)
+                if (digit < 0) { count = 0; break }
+                steps[count++] = digit
+                code >>= 3
+            }
+        }
+        tapSteps = steps
+        tapCount = count >= 2 ? count : 0
+    }
 
     function markSettingsSeen(key) {
         if (settingsMsgs.indexOf(key) < 0 || settingsSeen[key])
@@ -893,6 +920,7 @@ Item {
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
         saveGroup("start", [Math.max(0, readSpeed(secretStartSpeed, 1))])
+        saveGroup("taps", [packTaps()])
         saveGroup("ramp", [Math.max(0, Math.min(10, readReal(legalRamp, 2)))])
         saveGroup("sound", [boolAtom(profileChangeBeep)])
         saveGroup("beeps", [boolAtom(powerOnBeep), boolAtom(powerOffBeep), boolAtom(lockBeep), boolAtom(unlockBeep), boolAtom(lockedButtonBeep), boolAtom(cruiseStartBeep), boolAtom(cruiseStopBeep), boolAtom(cruiseToggleBeep), boolAtom(hornBeep), boolAtom(findBeep), boolAtom(alarmBeep)])
@@ -927,7 +955,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -1004,6 +1032,8 @@ Item {
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
         } else if (parts[0] === "start") {
             setSpeed(secretStartSpeed, parts[1], 1)
+        } else if (parts[0] === "taps") {
+            loadTaps(Number(parts[1]))
         } else if (parts[0] === "ramp") {
             setReal(legalRamp, parts[1], 2)
         } else if (parts[0] === "sound") {
@@ -2963,6 +2993,48 @@ Item {
                                 }
 
                                 Label { text: "Each gesture is a number of power button presses with the listed levers held down at the same time."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: 6; Layout.bottomMargin: 6 }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label { text: "Profile tap sequence"; font.bold: true; Layout.fillWidth: true }
+                                    ComboBox {
+                                        model: ["Off", "2 taps", "3 taps", "4 taps"]
+                                        currentIndex: root.tapCount ? root.tapCount - 1 : 0
+                                        onActivated: { root.tapCount = index ? index + 1 : 0; root.markDirty() }
+                                    }
+                                }
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    visible: root.tapCount > 0
+                                    columns: 2
+                                    Repeater {
+                                        model: 4
+                                        RowLayout {
+                                            property int step: index
+                                            visible: step < root.tapCount
+                                            Layout.fillWidth: true
+                                            Label { text: String(parent.step + 1) }
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                model: ["Brake", "Throttle", "Button"]
+                                                currentIndex: root.tapSteps[parent.step]
+                                                onActivated: {
+                                                    var steps = root.tapSteps.slice()
+                                                    steps[parent.step] = index
+                                                    root.tapSteps = steps
+                                                    root.markDirty()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Label {
+                                    visible: root.tapCount > 0
+                                    text: "Tap and release each control in order to switch profiles. Keep taps under 0.45 s and gaps under 1 s. If Button is first, start the next tap within the usual button-click window (0.3 s from pressing Button)."
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                    opacity: 0.7
+                                }
                             }
                         }
                     }

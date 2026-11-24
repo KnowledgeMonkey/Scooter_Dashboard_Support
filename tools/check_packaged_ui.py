@@ -58,6 +58,17 @@ Item {
                 dashboard.cfgImport(previous + "\\nstart 0")
                 if (dashboard.cfgLines.start !== "start 0")
                     throw new Error("Separate secret start speed was lost")
+                if (dashboard.packTaps() !== 0) throw new Error("Tap shortcut default")
+                dashboard.cfgImport(previous + "\\nstart 0\\ntaps 1290")
+                if (dashboard.tapCount !== 4 || dashboard.tapSteps.join(",") !== "1,0,2,1"
+                        || dashboard.packTaps() !== 1290
+                        || dashboard.cfgExport().indexOf("taps 1290") < 0)
+                    throw new Error("Ordered tap backup round trip")
+                dashboard.loadTaps(9)
+                if (dashboard.tapCount !== 2 || dashboard.packTaps() !== 9)
+                    throw new Error("Two brake taps")
+                dashboard.loadTaps(3)
+                if (dashboard.packTaps() !== 0) throw new Error("Invalid sequence")
                 console.log("PACKAGE_DIAL_VISIBLE")
             } catch (e) { console.error(e) }
             Qt.quit()

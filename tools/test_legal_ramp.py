@@ -111,8 +111,123 @@ def program(source, saved):
 (set 'legal-ramp-seconds 0.0)
 (frame 220 60 0.1)
 (def bypass-ok (near adc1 (/ 220 77.2)))
+; Read the same inputs the button loop sees. A moving wheel and a legal
+; throttle ramp must not suppress physical taps, and decoded ADC stays at rest.
+(defun get-speed () (/ cur-speed-kmh 3.6))
+(set 'cur-speed-kmh 20.0)
+(set 'button-safety-speed 0.0)
+(set 'legal-ramp-seconds 2.0)
+(def taps-default-off (= profile-taps 0))
+(save-group 'taps '(1290i32)) ; throttle, brake, button, throttle
+(load-settings)
+(def taps-saved (= profile-taps 1290))
+(defun sample (keys dt) {
+    (frame (if (!= 0 (bitwise-and keys 2)) 165 60)
+           (if (!= 0 (bitwise-and keys 1)) 165 60) dt)
+    (read-profile-taps (!= 0 (bitwise-and keys 4)))
+})
+(defun tap (key) { (sample key 0.12) (sample 0 0.12) })
+(set 'unlock false)
+(set 'secret-enabled true)
+(sample 0 0.12)
+(tap 2) (tap 1) (set 'presses 1) (tap 4)
+(sample 2 0.12)
+(def before-release (and (not unlock) (= presses 0) (not (gestures-allowed))))
+(sample 0 0.12)
+(def moving-ok (and unlock before-release))
+(sample 0 0.12)
+(def fires-once unlock)
+(tap 2) (tap 4) (tap 1) (tap 4) (tap 2)
+(def wrong-order-ok unlock)
+(sample 0 1.2)
+(tap 2) (sample 3 0.10) (sample 1 0.12) (sample 0 0.10) (tap 1) (tap 4) (tap 2)
+(def overlap-ok unlock)
+(sample 0 1.2)
+(tap 2) (sample 0 1.2) (tap 1) (tap 4) (tap 2)
+(def gap-cancels unlock)
+(sample 0 1.2)
+(sample 2 0.12) (sample 2 0.6) (sample 0 0.10) (tap 1) (tap 4) (tap 2)
+(def long-cancels unlock)
+(sample 0 1.2)
+(tap 2) (set 'clock (+ clock 0.75)) (read-profile-taps false)
+(sample 0 0.12) (tap 1) (tap 4) (tap 2)
+(def stale-cancels unlock)
+(sample 0 1.2)
+(tap 2) (tap 1) (tap 4) (tap 2)
+(def return-ok (not unlock))
+(set 'secret-enabled false)
+(tap 2) (tap 1) (tap 4) (tap 2)
+(def disabled-ok (not unlock))
+(set 'secret-enabled true)
+(set 'secret-requires-lock true)
+(tap 2) (tap 1) (tap 4) (tap 2)
+(def lock-pref-ok (not unlock))
+(set 'secret-requires-lock false)
+(save-group 'taps '(9)) ; two separate brake taps
+(load-settings)
+(set 'software-adc false) (set 'software-adc2 false)
+(read-profile-taps false)
+(set 'lev-brk 1.0) (read-profile-taps false) (read-profile-taps false)
+(set 'lev-brk 0.0) (read-profile-taps false)
+(def repeat-once (not unlock))
+(set 'lev-brk 1.0) (read-profile-taps false)
+(set 'lev-brk 0.0) (read-profile-taps false)
+(def repeat-ok (and repeat-once unlock))
+; With the original riding shortcut configured, a simultaneous half-second
+; hold still returns to legal through the same gated legacy handlers.
+(set 'button-safety-speed 20.0)
+(set 'secret-off-presses 0) (set 'secret-off-combo 0)
+(set 'lev-thr 1.0) (set 'lev-brk 1.0)
+(read-profile-taps false) (if (gestures-allowed) (handle-lever-gestures))
+(set 'clock (+ clock 0.6))
+(read-profile-taps false) (if (gestures-allowed) (handle-lever-gestures))
+(def hold-ok (and (not unlock) (not lever-armed)))
+(set 'lev-thr 0.0) (set 'lev-brk 0.0)
+(read-profile-taps false) (handle-lever-gestures)
+; A separate power-button tap still reaches the ordinary headlight shortcut.
+(set 'light false) (set 'presses 1)
+(read-profile-taps true) (read-profile-taps false)
+(handle-button)
+(def button-ok (and light lever-armed))
+; Use native 0.1 ms tick units for the ordinary button dispatch window.
+(defun systime () (to-i (* clock 10000.0)))
+(defun secs-since (stamp) (- clock (/ stamp 10000.0)))
+(save-group 'taps '(20)) ; button, throttle
+(load-settings)
+(set 'software-adc false) (set 'software-adc2 false)
+(set 'button-safety-speed 20.0)
+(set 'light false)
+(defun controls (keys dt) {
+    (set 'clock (+ clock dt))
+    (var down (!= 0 (bitwise-and keys 4)))
+    (if (and down (not last-button-state)) {
+        (setq presses (+ presses 1)) (setq press-time (systime)) })
+    (setq last-button-state down)
+    (setq lev-thr (if (!= 0 (bitwise-and keys 2)) 1.0 0.0))
+    (setq lev-brk (if (!= 0 (bitwise-and keys 1)) 1.0 0.0))
+    (if (> profile-taps 0) (read-profile-taps down))
+    (button-apply down)
+})
+(set 'presses 0)
+(controls 0 0.06) (controls 4 0.06) (controls 0 0.10) (controls 0 0.25)
+(def solo-button-ok (and light (not unlock) (= presses 0)))
+(controls 4 0.06) (controls 0 0.08) (controls 2 0.08) (controls 0 0.22)
+(def button-first-ok (and light unlock (= presses 0)))
+(save-group 'taps '(36)) ; two separate button taps
+(load-settings)
+(set 'software-adc false) (set 'software-adc2 false)
+(controls 0 0.06) (controls 4 0.06) (controls 0 0.08) (controls 4 0.08) (controls 0 0.08)
+(controls 0 0.40)
+(def two-buttons-ok (and light (not unlock) (= presses 0)))
+(save-group 'taps '(26)) ; second digit is a simultaneous press
+(load-settings)
+(def bad-code-ok (= profile-taps 0))
+(save-group 'taps '(0)) (load-settings)
+(def taps-off-again (= profile-taps 0))
 (check (and independent-ok secret-at-zero boundary-ok persisted-ok rising-ok full-ok release-ok brake-ok kick-ok range-ok
-            secret-ok back-ok gap-ok bypass-ok))
+            secret-ok back-ok gap-ok bypass-ok taps-default-off taps-saved moving-ok fires-once
+            wrong-order-ok overlap-ok gap-cancels long-cancels stale-cancels return-ok disabled-ok
+            lock-pref-ok repeat-ok hold-ok button-ok solo-button-ok button-first-ok two-buttons-ok bad-code-ok taps-off-again))
 '''
     return mocks + source + assertions
 
@@ -135,7 +250,7 @@ def main():
             # Upstream's test runner exit code is not a conventional pass/fail code.
             if '\nSUCCESS\n' not in output or 'Error:' in output:
                 raise SystemExit(f'LispBM startup failed ({name}):\n{output}')
-            print(f'LispBM startup, settings, legal ramp, braking and profile switches: {name} OK')
+            print(f'LispBM startup, settings, legal ramp, braking, profile switches and ordered taps: {name} OK')
 
 
 if __name__ == '__main__':

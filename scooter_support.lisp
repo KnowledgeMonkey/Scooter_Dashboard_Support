@@ -192,6 +192,12 @@
 (def lev-thr 0.0)
 (def lev-brk 0.0)
 
+; Ordered taps use three bits per step, first tap in the low bits.
+(def profile-taps 0)
+(def tap-left 0)
+(def tap-key -1) ; wait for neutral at startup and after interruptions
+(def tap-tick 0)
+(def brk-corr-v 0.0)
 (def lever-state 0)
 (def lever-since (systime))
 (def lever-armed true)
@@ -358,6 +364,7 @@
     (show-batt-in-idle 6 b false)
     (min-speed-kmh 7 f 1.0)
     (secret-start-kmh 115 f 1.0)
+    (profile-taps 116 i 0)
     (legal-ramp-seconds 114 f 1.0)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5)
@@ -485,6 +492,7 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (taps profile-taps)
     (start secret-start-kmh)
     (ramp legal-ramp-seconds)
     (sound profile-change-beep)
@@ -585,6 +593,15 @@
             (loopforeach n (cdr g)
                 (if (not (member n speed-settings))
                     (set n (let ((v (read-setting n))) (if (eq v 'unset) (eval n) v))))))
+        (setq profile-taps (to-i profile-taps))
+        (reset-profile-taps)
+        ; An unrelated EEPROM value must describe 2-4 single controls to be usable.
+        (if (or (< profile-taps 9) (>= profile-taps 4096)) (setq profile-taps 0))
+        (var digits profile-taps)
+        (loopwhile (> digits 0) {
+            (if (not (member (bitwise-and digits 7) '(1 2 4))) (setq profile-taps 0))
+            (setq digits (shr digits 3))
+        })
         ; the Control tab switch is persisted on its own, outside any group
         (set 'cruise-enabled (let ((v (read-setting 'cruise-enabled))) (if (eq v 'unset) cruise-enabled v)))
         ; these divide, so an unwritten slot has to come back as its default and
@@ -1180,6 +1197,7 @@
         (if (< brake 0.0) (setq brake 0.0))
         (if (> brake 3.3) (setq brake 3.3))
 
+        (setq brk-corr-v brake)
         (set 'thr-corr-v throttle) ; pre-mask - cruise release detection needs it
 
         (if (and software-adc (not unlock) (> legal-ramp-seconds 0.0) (not cruising))
@@ -2244,22 +2262,56 @@
     })
 )
 
-(defun combo-held(combo thr brk) ; exclusive lever matching
-    (cond
-        ((= combo 0) (and (> brk adc-touch) (> thr adc-touch)))
-        ((= combo 1) (and (> brk adc-touch) (<= thr adc-touch)))
-        ((= combo 2) (and (> thr adc-touch) (<= brk adc-touch)))
-        ((= combo 3) (and (<= brk adc-touch) (<= thr adc-touch))) ; no levers
-    )
-)
+(defun lever-mask (thr brk)
+    (+ (if (> brk adc-touch) 1 0) (if (> thr adc-touch) 2 0)))
 
-(defun combo-state-match(combo state) ; state: bit0=brake, bit1=throttle
-    (cond
-        ((= combo 0) (= state 3))
-        ((= combo 1) (= state 1))
-        ((= combo 2) (= state 2))
-    )
-)
+(defun held-combo (mask) (ix '(3 1 2 0) mask))
+
+(defun reset-profile-taps () { (setq tap-left 0) (setq tap-key -1) })
+
+; Keep a leading button tap available to the ordinary button handler until
+; the rider starts the next correct step within the native click window.
+(defun tap-button-pending ()
+    (and (> tap-left 0) (= (bitwise-and profile-taps 7) 4) (= tap-left (shr profile-taps 3))))
+
+(defun claim-button () (if (> presses 0) (setq presses (- presses 1))))
+
+; A tap is one isolated press followed by a neutral sample. Overlap and holds
+; invalidate the prefix until all three controls have been released.
+(defun profile-tap-sample (mask) {
+    (if (> (secs-since tap-tick) (if (= tap-key 0) 1.0 0.45))
+        { (setq tap-left 0) (if (!= tap-key 0) (setq tap-key -1)) })
+    (if (!= mask tap-key)
+        (cond
+            ((= mask 0) {
+                (var code (if (= tap-left 0) profile-taps tap-left))
+                (if (and (> tap-key 0) (= tap-key (bitwise-and code 7)))
+                    {
+                        (if (and (= tap-key 4) (> tap-left 0)) (claim-button))
+                        (setq tap-left (shr code 3))
+                        (if (= tap-left 0) (toggle-secret))
+                    }
+                    (setq tap-left 0))
+                (setq tap-key 0)
+                (setq tap-tick (systime))
+            })
+            ((= tap-key 0) {
+                (if (and (tap-button-pending) (= mask (bitwise-and tap-left 7))) (claim-button))
+                (setq tap-key mask)
+                (setq tap-tick (systime))
+            })
+            (t (reset-profile-taps))))
+})
+
+(defun read-profile-taps (button)
+    (if (and (not off) (eq calib-stage 'idle)
+             (if unlock (if secret-off-requires-lock lock (not lock))
+                 (and secret-enabled (or (not secret-requires-lock) lock)))
+             (or (not (or software-adc software-adc2)) (<= (secs-since last-rx) 0.5)))
+        (profile-tap-sample (+ (if button 4 0)
+            (if (if software-adc (> thr-corr-v (+ (conf-get 'adc-v1-start) 0.05)) (> lev-thr adc-touch)) 2 0)
+            (if (if software-adc2 (> brk-corr-v (+ (conf-get 'adc-v2-start) 0.05)) (> lev-brk adc-touch)) 1 0)))
+        (reset-profile-taps)))
 
 (defun toggle-secret()
     {
@@ -2304,66 +2356,37 @@
 (defun gestures-allowed() (or off (<= (abs (get-speed)) button-safety-speed)))
 (defun at-standstill() (or off (<= (abs (get-speed)) lock-safety-speed)))
 
-; Button gestures. Matching order: power-on, secret, lock, modes, light.
-(defun handle-button()
-    {
-        (var thr lev-thr)
-        (var brk lev-brk)
-        (cond
-            ((and off (= presses 1)) ; power on always wins when off
-                {
-                    (set 'off false) ; turn on
-                    (if power-on-beep (set 'feedback 1)) ; beep feedback
-                    (set 'unlock false) ; Disable unlock on turn off
-                    (boot-state)
-                    (apply-mode) ; Apply mode on start-up
-                    (stats-reset) ; reset stats when turning on
-                }
-            )
-            ((and unlock
-                    (if secret-off-requires-lock lock (not lock))
-                    (> secret-off-presses 0)
-                    (= presses secret-off-presses)
-                    (combo-held secret-off-combo thr brk))
-                (toggle-secret) ; unlock is set, so this can only turn it off
-            )
-            ((and secret-enabled
-                    (> secret-presses 0)
-                    (= presses secret-presses)
-                    (combo-held secret-combo thr brk)
-                    (or (not secret-requires-lock) lock))
-                (toggle-secret)
-            )
-            ((and (> lock-presses 0)
-                    (= presses lock-presses)
-                    (combo-held lock-combo thr brk))
-                (if (at-standstill) (toggle-lock)) ; never while moving
-            )
-            ((and (if mode-requires-lock lock (not lock))
-                    (> mode-presses 0)
-                    (= presses mode-presses)
-                    (combo-held mode-combo thr brk))
-                (cycle-mode)
-            )
-            ((and (if light-requires-lock lock (not lock))
-                    (> light-presses 0)
-                    (= presses light-presses)
-                    (combo-held light-combo thr brk))
-                (toggle-light)
-            )
-            (lock (if locked-button-beep (set 'feedback 1))) ; locked: beep on any unmatched press
-        )
-    }
-)
+(defun lock-if-stopped () (if (at-standstill) (toggle-lock)))
 
-; Gestures configured with 0 presses fire from levers alone: the lever
-; combination must be held steady for 0.5 s and releases re-arm it.
+(defun gesture-action (n combo)
+    (cond
+        ((and unlock (= n secret-off-presses) (= combo secret-off-combo)
+              (if secret-off-requires-lock lock (not lock))) toggle-secret)
+        ((and secret-enabled (= n secret-presses) (= combo secret-combo)
+              (or (not secret-requires-lock) lock)) toggle-secret)
+        ((and (> n 0) (= n lock-presses) (= combo lock-combo)) lock-if-stopped)
+        ((and (= n mode-presses) (= combo mode-combo)
+              (if mode-requires-lock lock (not lock))) cycle-mode)
+        ((and (= n light-presses) (= combo light-combo)
+              (if light-requires-lock lock (not lock))) toggle-light)))
+
+(defun handle-button ()
+    (if (and off (= presses 1))
+        {
+            (set 'off false) ; turn on
+            (if power-on-beep (set 'feedback 1)) ; beep feedback
+            (set 'unlock false) ; Disable unlock on turn off
+            (boot-state)
+            (apply-mode) ; Apply mode on start-up
+            (stats-reset) ; reset stats when turning on
+        }
+        (let ((action (gesture-action presses (held-combo (lever-mask lev-thr lev-brk)))))
+            (if action (action) (if (and lock locked-button-beep) (setq feedback 1))))))
+
+; Zero-press gestures still require the original half-second hold and a release to re-arm.
 (defun handle-lever-gestures()
     {
-        (var thr lev-thr)
-        (var brk lev-brk)
-        (var state (+ (if (> brk adc-touch) 1 0) (if (> thr adc-touch) 2 0)))
-
+        (var state (lever-mask lev-thr lev-brk))
         (if (!= state lever-state) {
             (set 'lever-state state)
             (set 'lever-since (systime))
@@ -2371,37 +2394,8 @@
         (if (= state 0) (set 'lever-armed true))
 
         (if (and lever-armed (> state 0) (> (secs-since lever-since) 0.5))
-            (cond
-                ((and unlock (= secret-off-presses 0)
-                        (if secret-off-requires-lock lock (not lock))
-                        (combo-state-match secret-off-combo state))
-                    {
-                        (set 'lever-armed false)
-                        (toggle-secret)
-                    }
-                )
-                ((and secret-enabled
-                        (= secret-presses 0)
-                        (combo-state-match secret-combo state)
-                        (or (not secret-requires-lock) lock))
-                    {
-                        (set 'lever-armed false)
-                        (toggle-secret)
-                    }
-                )
-                ((and (if mode-requires-lock lock (not lock)) (= mode-presses 0) (combo-state-match mode-combo state))
-                    {
-                        (set 'lever-armed false)
-                        (cycle-mode)
-                    }
-                )
-                ((and (if light-requires-lock lock (not lock)) (= light-presses 0) (combo-state-match light-combo state))
-                    {
-                        (set 'lever-armed false)
-                        (toggle-light)
-                    }
-                )
-            )
+            (let ((action (gesture-action 0 (held-combo state))))
+                (if action { (setq lever-armed false) (action) }))
         )
     }
 )
@@ -2428,7 +2422,8 @@
 )
 
 ; Speed mode implementation
-(defun apply-mode()
+(defun apply-mode() {
+    (reset-profile-taps)
     (if (not unlock)
         (cond
             ((= speedmode 1) (configure-speed drive-speed drive-watts drive-current drive-fw drive-om))
@@ -2441,7 +2436,7 @@
             ((= speedmode 4) (configure-speed secret-sport-speed secret-sport-watts secret-sport-current secret-sport-fw secret-sport-om))
         )
     )
-)
+})
 
 (defun configure-speed(speed watts current fw om) ; one gate per parameter, normal and secret alike
     {
@@ -2719,6 +2714,7 @@
                     ; lever released halfway through was seen both ways at once
                     (set 'lev-thr (get-adc-decoded 0))
                     (set 'lev-brk (get-adc-decoded 1))
+                    (if (> profile-taps 0) (trap (read-profile-taps button-state)))
                     (button-apply button-state)
                     (if (and (not off) (gestures-allowed)) (handle-lever-gestures))
                     (handle-features)
@@ -2745,6 +2741,7 @@
                 )
                 (if (> presses 0) ; if presses > 0
                     {
+                        (if (tap-button-pending) (setq tap-left 0))
                         (if (gestures-allowed)
                             (handle-button) ; handle button presses
                         )
@@ -2805,20 +2802,11 @@
             ; timestamps captured at load are frozen into the image - reset them
             ; here or the first measurement after a boot compares against a
             ; reference from whenever the image was written
-            (set 'last-rx (systime))
-            (set 'app-cache-time (systime))
-            (set 'app-slow-time (systime))
-            ; not now: stamping this one here throttles away the first poll to
-            ; arrive, and the next is a hundred milliseconds behind it. Zero
-            ; makes secs-since large, so the very first 0x64 gets an answer.
-            (set 'dash-tx-time 0)
-            (set 'press-time (systime))
-            (set 'alarm-time (systime))
-            (set 'lever-since (systime))
-            (set 'blink-since (systime))
-            (set 'cruise-since (systime))
-            (set 'cruise-shown-time (systime))
-            (set 'calib-since (systime))
+            (loopforeach timer '(last-rx app-cache-time app-slow-time press-time alarm-time
+                                 lever-since blink-since cruise-since cruise-shown-time calib-since)
+                (set timer (systime)))
+            ; Zero lets the very first dash poll get an answer.
+            (setq dash-tx-time 0)
             (app-build-serial)
             (app-build-pin)
             (if (!= model 1) {
