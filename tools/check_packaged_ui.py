@@ -69,6 +69,25 @@ Item {
                     throw new Error("Two brake taps")
                 dashboard.loadTaps(3)
                 if (dashboard.packTaps() !== 0) throw new Error("Invalid sequence")
+                function findField(item) {
+                    if (item.objectName === "secretEntrySpeed") return item
+                    const children = item.children || []
+                    for (let i = 0; i < children.length; i++) {
+                        const found = findField(children[i])
+                        if (found) return found
+                    }
+                    return null
+                }
+                const field = findField(dashboard)
+                dashboard.cfgImport(previous + "\\nentry 3.0")
+                if (!field || field.text !== "3" || dashboard.cfgExport().indexOf("entry 3.0") < 0)
+                    throw new Error("Secret entry speed field or backup round trip")
+                dashboard.cfgImport(previous)
+                if (field.text !== "3") throw new Error("Older backup replaced the entry speed")
+                dashboard.applySettingsLine("misc false 10 true false false 0 1 0 1 0 0 false")
+                dashboard.applySettingsLine("entry 3.0")
+                if (field.text !== "1.86" || Number(dashboard.readSpeed(field, 1)) !== 3)
+                    throw new Error("Secret entry speed in mph")
                 console.log("PACKAGE_DIAL_VISIBLE")
             } catch (e) { console.error(e) }
             Qt.quit()

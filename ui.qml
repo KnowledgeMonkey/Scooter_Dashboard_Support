@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps", "entry"]
 
     // The low three bits hold the first tap. Keep the editable draft even
     // when the rider temporarily changes the sequence length in the form.
@@ -810,7 +810,8 @@ Item {
         var n = Number(kmh)
         if (!Number.isFinite(n)) return
         if (useMph.checked) n = n * mphFactor // km/h -> mph
-        field.text = (Math.abs(n - Math.round(n)) < 0.05) ? Math.round(n).toString() : n.toFixed(decimals)
+        field.text = Math.abs(n - Math.round(n)) < 0.5 * Math.pow(10, -decimals)
+                ? Math.round(n).toString() : n.toFixed(decimals)
     }
 
     // Temperatures ride along with the same switch: the script keeps and stores
@@ -855,13 +856,14 @@ Item {
     function convertSpeedFields(toMiles) {
         var factor = toMiles ? mphFactor : (1 / mphFactor)
         var fs = [ecoSpeed, driveSpeed, sportSpeed, secretEcoSpeed, secretDriveSpeed,
-            secretSportSpeed, minSpeed, secretStartSpeed, buttonSpeed, cruiseDeviation, cruiseMinSpeed,
+            secretSportSpeed, minSpeed, secretStartSpeed, secretEntrySpeed, buttonSpeed, cruiseDeviation, cruiseMinSpeed,
             cruiseMaxSpeed, alarmSpeedThreshold]
         for (var i = 0; i < fs.length; i++) {
             var n = Number.parseFloat(fs[i].text.replace(",", "."))
             if (Number.isFinite(n)) {
                 var v = n * factor
-                fs[i].text = (Math.abs(v - Math.round(v)) < 0.05) ? Math.round(v).toString() : v.toFixed(1)
+                var decimals = fs[i] === secretEntrySpeed ? 2 : 1
+                fs[i].text = Number(v.toFixed(decimals)).toString()
             }
         }
     }
@@ -920,6 +922,7 @@ Item {
             readReal(alarmGyroThreshold, 1), readReal(alarmVoltage, 1)])
 
         saveGroup("start", [Math.max(0, readSpeed(secretStartSpeed, 1))])
+        saveGroup("entry", [Math.max(0, readSpeed(secretEntrySpeed, 1))])
         saveGroup("taps", [packTaps()])
         saveGroup("ramp", [Math.max(0, Math.min(10, readReal(legalRamp, 2)))])
         saveGroup("sound", [boolAtom(profileChangeBeep)])
@@ -955,7 +958,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps", "entry"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -1030,6 +1033,8 @@ Item {
             setSpeed(minSpeed, parts[5], 1)
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
+        } else if (parts[0] === "entry") {
+            setSpeed(secretEntrySpeed, parts[1], 2)
         } else if (parts[0] === "start") {
             setSpeed(secretStartSpeed, parts[1], 1)
         } else if (parts[0] === "taps") {
@@ -2927,6 +2932,32 @@ Item {
                                     enabled: secretEnabled.checked
 
                                     Label { text: "Secret"; font.bold: true; Layout.bottomMargin: 3 }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label {
+                                            text: "Allow secret entry above (" + (useMph.checked ? "mph" : "km/h") + ")"
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.WordWrap
+                                        }
+                                        TextField {
+                                            id: secretEntrySpeed
+                                            objectName: "secretEntrySpeed"
+                                            Layout.preferredWidth: 90
+                                            horizontalAlignment: TextInput.AlignHCenter
+                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                                            maximumLength: 7
+                                            placeholderText: "0"
+                                            validator: DoubleValidator { bottom: 0; decimals: useMph.checked ? 2 : 1; notation: DoubleValidator.StandardNotation }
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        visible: Number(root.readSpeed(secretEntrySpeed, 1)) > 0
+                                            && Number(root.readSpeed(buttonSpeed, 1)) <= Number(root.readSpeed(secretEntrySpeed, 1))
+                                        text: "For button and hold combos, set “Disable Gestures above” higher than the entry speed."
+                                    }
 
                                     RowLayout {
                                         Layout.fillWidth: true

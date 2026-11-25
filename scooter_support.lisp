@@ -68,6 +68,9 @@
 
 ; Button gestures (combo: 0=brake+throttle, 1=brake only, 2=throttle only, 3=none)
 ; presses = 0 means no button press needed, the gesture fires from levers alone
+(def secret-entry-kmh 0.0)
+(def entry-click-ok true)
+(def entry-hold-ok true)
 (def secret-presses 1)
 (def secret-off-presses 3) ; a gesture that only ever leaves secret, never enters
 (def secret-off-combo 3)
@@ -365,6 +368,7 @@
     (min-speed-kmh 7 f 1.0)
     (secret-start-kmh 115 f 1.0)
     (profile-taps 116 i 0)
+    (secret-entry-kmh 117 f 0.0)
     (legal-ramp-seconds 114 f 1.0)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5)
@@ -492,6 +496,7 @@
         tail-off-lock)
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
+    (entry secret-entry-kmh)
     (taps profile-taps)
     (start secret-start-kmh)
     (ramp legal-ramp-seconds)
@@ -618,13 +623,11 @@
         (if (not (and (>= legal-ramp-seconds 0.0) (<= legal-ramp-seconds 10.0)))
             (set 'legal-ramp-seconds 0.0))
         (reset-legal-ramp)
-        (set 'eco-speed (/ (setting-def 'eco-speed-kmh) 3.6))
-        (set 'drive-speed (/ (setting-def 'drive-speed-kmh) 3.6))
-        (set 'sport-speed (/ (setting-def 'sport-speed-kmh) 3.6))
-        (set 'secret-eco-speed (/ (setting-def 'secret-eco-speed-kmh) 3.6))
-        (set 'secret-drive-speed (/ (setting-def 'secret-drive-speed-kmh) 3.6))
-        (set 'secret-sport-speed (/ (setting-def 'secret-sport-speed-kmh) 3.6))
-        (set 'button-safety-speed (/ (setting-def 'button-speed-kmh) 3.6))
+        (loopforeach pair '((eco-speed . eco-speed-kmh) (drive-speed . drive-speed-kmh)
+                (sport-speed . sport-speed-kmh) (secret-eco-speed . secret-eco-speed-kmh)
+                (secret-drive-speed . secret-drive-speed-kmh) (secret-sport-speed . secret-sport-speed-kmh)
+                (button-safety-speed . button-speed-kmh))
+            (set (car pair) (/ (setting-def (cdr pair)) 3.6)))
         ; adc-input divides by these every lever frame, so a zero from a bad save
         ; or a corrupt cell must never reach it
         (if (< light-gain-thr 0.05) (set 'light-gain-thr 1.0))
@@ -852,7 +855,7 @@
             (tf img-ok)
             (str-from-n cur-fet-max "%.0f ")
             (str-from-n cur-mot-max "%.0f ")
-            (tf secret-enabled)
+            (tf (and secret-enabled (entry-speed-ok)))
             (str-from-n (+ 1 (length (can-devs))) "%d ")
             (str-from-n (get-fault) "%d ")
             (str-from-n (wheel-slip) "%d ")
@@ -1726,30 +1729,19 @@
 ; The app fetches 0xB0..0xC9 as a single 52 byte read. Assembling that is 26
 ; register lookups and 104 buffer operations, so it is done once per cache
 ; cycle and only when something actually asks for it.
-(defunret app-pend-buf ()
-    {
-        (if (= pend-dev 0x22)
-            (return (cond
-                ((and (= pend-reg 0x33) (= pend-n 4)) app-f-33)
-                ((and (= pend-reg 0x35) (= pend-n 2)) app-f-35)
-                ((and (= pend-reg 0x31) (= pend-n 2)) app-f-31)
-                ((and (= pend-reg 0x40) (= pend-n 30)) app-f-40)
-                (t nil)
-            ))
-        )
-        (cond
-            ((and (= pend-reg 0xb4) (= pend-n 6)) app-f-b4)
-            ((and (= pend-reg 0xb0) (= pend-n 52)) app-f-b0)
-            ((and (= pend-reg 0x7b) (= pend-n 6)) app-f-7b)
-            ((and (= pend-reg 0x1a) (= pend-n 2)) app-f-1a)
-            ((and (= pend-reg 0x25) (= pend-n 2)) app-f-25)
-            ((and (= pend-reg 0x3b) (= pend-n 2)) app-f-3b)
-            ((and (= pend-reg 0x75) (= pend-n 2)) app-f-75)
-            ((and (= pend-reg 0xda) (= pend-n 12)) app-f-da)
-            (t nil)
-        )
-    }
-)
+(defun app-pend-buf () {
+    (var reg (to-i pend-reg))
+    (var buf (if (= pend-dev 0x22)
+        (match reg
+            (0x33 app-f-33) (0x35 app-f-35) (0x31 app-f-31) (0x40 app-f-40)
+            (_ nil))
+        (match reg
+            (0xb4 app-f-b4) (0xb0 app-f-b0) (0x7b app-f-7b) (0x1a app-f-1a)
+            (0x25 app-f-25) (0x3b app-f-3b) (0x75 app-f-75) (0xda app-f-da)
+            (_ nil))))
+    ; A prepared Ninebot reply has nine bytes of framing around the requested data.
+    (if (and buf (= (buflen buf) (+ pend-n 9))) buf)
+})
 
 ; one buffer per app answer size that can occur - never resized, never allocated
 (defun combo-buf (al)
@@ -1918,8 +1910,8 @@
                 (app-todo+ 16)
             })))
         ((= reg 0x77) (let ((u (!= val 0)))
-            (if (not (eq u unlock)) {
-                (set 'unlock u)
+            (if (and (not (eq u unlock)) (entry-speed-ok)) {
+                (setq unlock u)
                 (app-todo+ 16)
             })))
         ((= reg 0x76) (let ((v (!= val 0)))
@@ -2310,21 +2302,24 @@
             (t (reset-profile-taps))))
 })
 
+; Zero preserves standstill entry. Leaving secret is always allowed by this setting.
+(defun entry-speed-ok ()
+    (or unlock (<= secret-entry-kmh 0) (> (get-speed) (/ secret-entry-kmh 3.6))))
+
 (defun read-profile-taps (button)
     (let ((mask (gesture-levers true)))
-        (if (and (>= mask 0) (not off) (eq calib-stage 'idle)
+        (if (and (>= mask 0) (not off) (eq calib-stage 'idle) (entry-speed-ok)
                  (if unlock (eq secret-off-requires-lock lock)
                      (and secret-enabled (or (not secret-requires-lock) lock))))
             (profile-tap-sample (+ (if button 4 0) mask))
             (reset-profile-taps))))
 
-(defun toggle-secret()
-    {
-        (set 'unlock (not unlock))
-        (if profile-change-beep (set 'feedback 2)) ; beep 2x
+(defun toggle-secret ()
+    (if (entry-speed-ok) {
+        (setq unlock (not unlock))
+        (if profile-change-beep (setq feedback 2))
         (apply-mode)
-    }
-)
+    }))
 
 (defun toggle-lock()
     {
@@ -2370,7 +2365,8 @@
                 ((and unlock (= n secret-off-presses) (= combo secret-off-combo)
                       (eq secret-off-requires-lock lock)) toggle-secret)
                 ((and secret-enabled (= n secret-presses) (= combo secret-combo)
-                      (or (not secret-requires-lock) lock)) toggle-secret)
+                      (or (not secret-requires-lock) lock))
+                    (if (or unlock (if (= n 0) entry-hold-ok entry-click-ok)) toggle-secret))
                 ((and (> n 0) (= n lock-presses) (= combo lock-combo)) lock-if-stopped)
                 ((and (= n mode-presses) (= combo mode-combo)
                       (eq mode-requires-lock lock)) cycle-mode)
@@ -2395,9 +2391,11 @@
     {
         (var state (gesture-levers false))
         (if (!= state lever-state) {
-            (set 'lever-state state)
-            (set 'lever-since (systime))
+            (setq lever-state state)
+            (setq lever-since (systime))
+            (setq entry-hold-ok true)
         })
+        (if (not (entry-speed-ok)) (setq entry-hold-ok false))
         (if (= state 0) (set 'lever-armed true))
 
         (if (and lever-armed (> state 0) (> (secs-since lever-since) 0.5))
@@ -2699,19 +2697,23 @@
     }
 )
 
+(defun sample-button (down) {
+    (if (= presses 0) (setq entry-click-ok true))
+    (if (and down (not last-button-state)) {
+        (setq presses (+ presses 1))
+        (setq press-time (systime))
+    })
+    (if (and (> presses 0) (not (entry-speed-ok))) (setq entry-click-ok false))
+    (setq last-button-state down)
+})
+
 (defun button-logic()
     {
         (loopwhile t
             {
                 (var button-state (read-button-pin)) ; paces the loop with its own sleeps
 
-                (if (and button-state (not last-button-state))
-                    {
-                        (set 'presses (+ presses 1))
-                        (set 'press-time (systime))
-                    }
-                )
-                (set 'last-button-state button-state)
+                (sample-button button-state)
 
                 ; A transient error here (BMS/CAN/gyro) must not permanently kill
                 ; button, lock, alarm and output handling - trap and keep looping.

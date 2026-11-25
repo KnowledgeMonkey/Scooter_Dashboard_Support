@@ -210,9 +210,7 @@ def program(source, saved):
 (defun controls (keys dt) {
     (set 'clock (+ clock dt))
     (var down (!= 0 (bitwise-and keys 4)))
-    (if (and down (not last-button-state)) {
-        (setq presses (+ presses 1)) (setq press-time (systime)) })
-    (setq last-button-state down)
+    (sample-button down)
     (setq lev-thr (if (!= 0 (bitwise-and keys 2)) 1.0 0.0))
     (setq lev-brk (if (!= 0 (bitwise-and keys 1)) 1.0 0.0))
     (if (> profile-taps 0) (read-profile-taps down))
@@ -302,12 +300,76 @@ def program(source, saved):
 (setq presses 1) (setq press-time (- (systime) 3500))
 (button-apply false)
 (def at-threshold-ok unlock)
+; Enter only on a new combination performed entirely above the configured speed.
+(def entry-default-ok (= secret-entry-kmh 0.0))
+(save-group 'entry '(3.0)) (load-settings)
+(def entry-saved (and (= secret-entry-kmh 3.0) (= (eeprom-read-f 117) 3.0)))
+(setq software-adc false) (setq software-adc2 false) (setq unlock false)
+(setq button-safety-speed (/ 10.0 3.6))
+(setq secret-combo 0) (setq secret-presses 1)
+(setq secret-off-combo 0) (setq secret-off-presses 0)
+(defun ride (v keys dt) {
+    (setq wheel-kmh v)
+    (controls keys dt)
+    (if (gestures-allowed) (handle-lever-gestures))
+})
+(defun click-combo (v) {
+    (ride v 7 0.06) (ride v 3 0.08) (ride v 3 0.32) (ride v 0 0.06)
+})
+(ride 0.0 0 0.06)
+(click-combo 2.9) (click-combo 3.0) (click-combo -4.0)
+(def entry-boundary-ok (not unlock))
+(ride 2.9 7 0.06) (ride 3.1 3 0.08) (ride 3.1 3 0.32)
+(def early-click-blocked (not unlock))
+(ride 3.1 0 0.06)
+(setq secret-presses 2)
+(ride 3.1 7 0.06) (ride 3.0 3 0.08) (ride 3.1 7 0.06)
+(ride 3.1 3 0.08) (ride 3.1 3 0.32)
+(def split-clicks-blocked (not unlock))
+(ride 3.1 0 0.06) (setq secret-presses 1)
+(click-combo 3.1)
+(def valid-click-entry unlock)
+(ride 0.0 3 0.06) (ride 0.0 3 0.51) (ride 0.0 0 0.06)
+(def hold-exit-ok (not unlock))
+(setq secret-presses 0)
+(ride 2.9 3 0.06) (ride 3.1 3 0.65)
+(def early-hold-blocked (not unlock))
+(ride 3.1 0 0.06) (ride 3.1 3 0.06) (ride 3.0 3 0.15) (ride 3.2 3 0.55)
+(def interrupted-hold-blocked (not unlock))
+(ride 3.2 0 0.06) (ride 3.2 3 0.06) (ride 3.2 3 0.55)
+(def valid-hold-entry unlock)
+(ride 0.0 0 0.06) (ctrl-secret false)
+(setq secret-presses 1) (setq profile-taps 10) ; throttle then brake
+(reset-profile-taps)
+(ride 2.9 2 0.10) (ride 3.1 2 0.10) (ride 3.1 0 0.10)
+(ride 3.1 1 0.10) (ride 3.1 0 0.10)
+(def early-tap-blocked (not unlock))
+(ride 3.1 2 0.10) (ride 3.1 0 0.10) (ride 3.1 1 0.10) (ride 3.0 0 0.10)
+(ride 3.1 1 0.10) (ride 3.1 0 0.10)
+(def interrupted-taps-blocked (not unlock))
+(ride 3.1 2 0.10) (ride 3.1 0 0.10) (ride 3.1 1 0.10) (ride 3.1 0 0.10)
+(def valid-tap-entry unlock)
+(ride 0.0 2 0.10) (ride 0.0 0 0.10) (ride 0.0 1 0.10) (ride 0.0 0 0.10)
+(def tap-exit-ok (not unlock))
+(setq wheel-kmh 3.0) (ctrl-secret true) (app-write 0x77 1)
+(def manual-entry-blocked (not unlock))
+(setq wheel-kmh 3.1) (ctrl-secret true)
+(def control-entry-ok unlock)
+(setq wheel-kmh 0.0) (ctrl-secret false)
+(setq wheel-kmh 3.1) (app-write 0x77 1)
+(def protocol-entry-ok unlock)
+(setq wheel-kmh 0.0) (app-write 0x77 0)
+(save-group 'entry '(0.0)) (load-settings) (ctrl-secret true)
+(def zero-restores-entry (and (= secret-entry-kmh 0) unlock))
 (check (and independent-ok secret-at-zero boundary-ok persisted-ok rising-ok full-ok release-ok brake-ok kick-ok range-ok
             secret-ok back-ok gap-ok bypass-ok taps-default-off taps-saved early-700-ok moving-ok fires-once
             wrong-order-ok overlap-ok gap-cancels long-cancels stale-cancels return-ok disabled-ok
             lock-pref-ok repeat-ok hold-ok button-ok solo-button-ok button-first-ok two-buttons-ok bad-code-ok taps-off-again floor-ok
             stopped-switch-ok rolling-switch-ok secret-floor-ok secret-drive-ok legal-floor-ok legal-drive-ok
-            speed-guard-ok stale-button-ok at-threshold-ok))
+            speed-guard-ok stale-button-ok at-threshold-ok entry-default-ok entry-saved entry-boundary-ok
+            early-click-blocked split-clicks-blocked valid-click-entry hold-exit-ok early-hold-blocked
+            interrupted-hold-blocked valid-hold-entry early-tap-blocked interrupted-taps-blocked
+            valid-tap-entry tap-exit-ok manual-entry-blocked control-entry-ok protocol-entry-ok zero-restores-entry))
 '''
     return mocks + source + assertions
 
