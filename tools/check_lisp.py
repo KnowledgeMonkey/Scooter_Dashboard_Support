@@ -233,6 +233,12 @@ def main():
     defs = set()
     for n in tree:
         collect_defs(n, defs)
+    tables = {n[1]: n[3] for n in tree if isinstance(n, list) and len(n) == 4
+              and n[0] == "def" and n[2] == "'" and isinstance(n[3], list)}
+    if "setting-defs" in tables:
+        # The startup loop defines each setting except these separately handled keys.
+        aliases = {"ver-code", *tables["speed-settings"]}
+        defs.update(row[0] for row in tables["setting-defs"] if row[0] not in aliases)
     calls, free = set(), set()
     for n in tree:
         walk(n, set(), defs, calls, free)

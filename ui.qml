@@ -81,7 +81,7 @@ Item {
     property bool statePending: false
     property double statePendingSince: 0
     readonly property var settingsMsgs: ["model", "general", "temps", "modes",
-        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps", "entry"]
+        "secret", "apply", "gesture", "misc", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps", "entry", "commutation"]
 
     // The low three bits hold the first tap. Keep the editable draft even
     // when the rider temporarily changes the sequence length in the form.
@@ -923,6 +923,7 @@ Item {
 
         saveGroup("start", [Math.max(0, readSpeed(secretStartSpeed, 1))])
         saveGroup("entry", [Math.max(0, readSpeed(secretEntrySpeed, 1))])
+        saveGroup("commutation", [boolAtom(bldcShortcut)])
         saveGroup("taps", [packTaps()])
         saveGroup("ramp", [Math.max(0, Math.min(10, readReal(legalRamp, 2)))])
         saveGroup("sound", [boolAtom(profileChangeBeep)])
@@ -958,7 +959,7 @@ Item {
     // misc first, exactly as send-settings orders it: it carries the mph switch, and
     // every speed after it is formatted for whichever unit it sets
     readonly property var cfgKeys: ["misc", "general", "temps", "modes", "secret",
-        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps", "entry"]
+        "apply", "gesture", "rear", "cruise", "alarm", "sound", "beeps", "ramp", "start", "taps", "entry", "commutation"]
 
     function cfgExport() {
         var out = ["vss-settings 1"]
@@ -1033,6 +1034,8 @@ Item {
             setSpeed(minSpeed, parts[5], 1)
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
+        } else if (parts[0] === "commutation") {
+            bldcShortcut.checked = parseBoolToken(parts[1])
         } else if (parts[0] === "entry") {
             setSpeed(secretEntrySpeed, parts[1], 2)
         } else if (parts[0] === "start") {
@@ -3025,6 +3028,13 @@ Item {
 
                                 Label { text: "Each gesture is a number of power button presses with the listed levers held down at the same time."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: 6; Layout.bottomMargin: 6 }
 
+                                CheckBox {
+                                    id: bldcShortcut
+                                    objectName: "bldcShortcut"
+                                    text: "4 taps at standstill: FOC / BLDC"
+                                    Layout.fillWidth: true
+                                }
+
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label { text: "Profile tap sequence"; font.bold: true; Layout.fillWidth: true }
@@ -4128,7 +4138,9 @@ Item {
                 return
             }
 
-            if (settingsMsgs.indexOf(message.split(" ")[0]) >= 0) {
+            if (message.startsWith("drive ")) {
+                VescIf.emitStatusMessage(message.slice(6), message === "drive BLDC" || message === "drive FOC")
+            } else if (settingsMsgs.indexOf(message.split(" ")[0]) >= 0) {
                 applySettingsLine(message)
             } else if (message === "model-ok") {
                 root.stepDone()

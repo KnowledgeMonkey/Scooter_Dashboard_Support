@@ -1,135 +1,31 @@
-(def software-adc true)  ; ADC1 / throttle from the dashboard
-(def software-adc2 true) ; ADC2 / brake from the dashboard
 ; Decoded lever position counted as a touch. get-adc-decoded is mapped by the
 ; ADC app itself (Start/End voltage + hysteresis, after our light correction),
 ; so >0 already means "past the configured start voltage" - this is just an
 ; epsilon against float noise, not a user-facing deadband.
 (def adc-touch 0.02)
-(def temp-warning-motor 80) ; temperature warning for motor in degree celsius
-(def temp-warning-fet 80) ; temperature warning for fet in degree celsius
-(def bms-temp-hi 50) ; pack too hot, from the BMS cell sensors
-(def bms-temp-lo 0) ; pack too cold to charge or pull hard
-(def show-batt-in-idle false) ; show idle-display instead of speed at idle, normal modes
-(def idle-display 0) ; 0 battery %, 1 battery V, 2 controller C, 3 motor C
 (def last-alarm-code 0) ; the code the app reads back after an alarm has cleared
-(def show-batt-idle-secret false) ; same but in secret modes
 (def min-speed 1) ; legal kick-start speed, km/h
 (def secret-start-speed 1)
-(def legal-ramp-seconds 1.0)
 (def ramp-level 0.0)
 (def ramp-tick (systime))
 (def ramp-ready false)
 (def ramp-rest-since nil)
 (def button-safety-speed (/ 0.1 3.6)) ; disabling button above 0.1 km/h (due to safety reasons)
 
-; Alarm parameters (foc-play-tone)
-(def alarm-tone true)
-(def alarm-speed-threshold 0.5) ; speed in km/h to trigger alarm
-(def alarm-gyro-threshold 10) ; change in degree/s to trigger alarm
-(def alarm-voltage 24) ; voltage for alarm sound, higher = louder
-;(def alarm-frequency) ; todo: not supported yet, lower = louder, current: 2=4000, 3=7000, 6=2000
-
-; Speed modes (km/h, watts, current scale)
+; Profile speeds in m/s.
 (def eco-speed (/ 7 3.6))
-(def eco-current 0.6)
-(def eco-watts 400)
-(def eco-fw 0)
 (def drive-speed (/ 17 3.6))
-(def drive-current 0.7)
-(def drive-watts 500)
-(def drive-fw 0)
 (def sport-speed (/ 22 3.6))
-(def sport-current 1.0)
-(def sport-watts 700)
-(def sport-fw 0)
-
-; Secret speed modes. To enable, press the button 2 times while holding break and throttle at the same time.
-(def secret-enabled true)
 (def secret-eco-speed (/ 27 3.6))
-(def secret-eco-current 1.0)
-(def secret-eco-watts 1000)
-(def secret-eco-fw 0)
 (def secret-drive-speed (/ 47 3.6))
-(def secret-drive-current 1.0)
-(def secret-drive-watts 1500)
-(def secret-drive-fw 0)
 (def secret-sport-speed (/ 1000 3.6)) ; 1000 km/h easy
-(def secret-sport-current 1.0)
-(def secret-sport-watts 2000)
-(def secret-sport-fw 10)
-
-; Per-parameter apply toggles - a disabled parameter is never written to the motor config
-(def apply-speed true)
-(def apply-current true)
-(def apply-watts true)
-(def apply-fw true)
-
-; Secret modes gate each parameter separately
-
-; Button gestures (combo: 0=brake+throttle, 1=brake only, 2=throttle only, 3=none)
-; presses = 0 means no button press needed, the gesture fires from levers alone
-(def secret-entry-kmh 0.0)
+(def drive-hold nil)
+(def drive-tick 0)
 (def entry-click-ok true)
 (def entry-hold-ok true)
-(def secret-presses 1)
-(def secret-off-presses 3) ; a gesture that only ever leaves secret, never enters
-(def secret-off-combo 3)
-(def secret-off-requires-lock false)
-(def secret-combo 0)
-(def secret-requires-lock false) ; secret gesture only works while locked
-(def secret-exit-on-lock false) ; locking drops back to normal modes
-(def lock-presses 2)
-(def lock-combo 1)
-(def mode-presses 2)
-(def mode-combo 3)
-(def mode-requires-lock false)
-(def light-presses 1)
-(def light-combo 3)
-(def light-requires-lock false)
-(def light-on-boot false)
-; Light compensation: reconstructs the light-off reading from a light-on
-; reading via corrected = (raw - offset) / gain. Calibrated with the Sample
-; buttons in Setup; gain=1/offset=0 is a no-op (uncalibrated default).
-(def light-offset-thr 0.0)
-(def light-gain-thr 1.0)
-(def light-offset-brk 0.0)
-(def light-gain-brk 1.0)
-(def boot-mode 1) ; speed mode applied at boot (1=drive, 2=eco, 4=sport)
-
-; Display / battery
-(def use-mph false) ; dash shows mph instead of km/h
-(def bms-soc-enable false) ; battery % from a VESC BMS when one reports
-
-; BLE pairing code reported to third-party apps, 6 digits
-(def app-pin 0)
-
-; Rear light on the servo/PPM pin via PWM (MOSFET driver)
-(def rear-light-enable false)
-(def auto-taillight false) ; taillight on from power on
-(def brake-light-mode 1) ; 0=off, 1=on while braking, 2=blink while braking
-(def taillight-brightness 0.4) ; tail light duty, 0-1
-(def tail-off-lock false)
-(def head-off-lock false)
 (def slip-erpm 1200.0) ; wheel spread that counts as slip, from VESC's own at boot
 (def slip-hold 2.0) ; seconds the slip lamp stays on after the last one
 (def slip-time 0)
-
-; Overmodulation factor per mode (max recommended 1.15)
-(def eco-om 1.0)
-(def drive-om 1.0)
-(def sport-om 1.0)
-(def secret-eco-om 1.0)
-(def secret-drive-om 1.0)
-(def secret-sport-om 1.0)
-(def apply-om false)
-
-; Cruise control (experimental)
-(def cruise-allow false) ; master switch - without it nothing can turn cruise on
-(def cruise-enabled false)
-(def cruise-delay 5.0) ; seconds of steady speed to activate
-(def cruise-deviation 1.0) ; km/h window counted as "steady"
-(def cruise-min-speed 5.0) ; km/h - cruise can only activate at or above this
-(def cruise-max-speed 35.0) ; km/h - cruise can only activate at or below this
 
 ; -> Code starts here (DO NOT CHANGE ANYTHING BELOW THIS LINE IF YOU DON'T KNOW WHAT YOU ARE DOING)
 
@@ -138,9 +34,6 @@
 (import "pkg@://vesc_packages/lib_code_server/code_server.vescpkg" 'code-server)
 (read-eval-program code-server)
 @const-end
-
-; Model (0=G30, 1=M365/1S/PRO2, 2=Slave)
-(def model 2)
 
 ; Protocol offsets, set per model in main
 (def tx-base 7) ; first dash field in tx-frame
@@ -172,18 +65,6 @@
 
 ; sound feedback
 (def feedback 0)
-(def profile-change-beep true)
-(def power-on-beep true)
-(def power-off-beep true)
-(def lock-beep true)
-(def unlock-beep true)
-(def locked-button-beep true)
-(def cruise-start-beep true)
-(def cruise-stop-beep true)
-(def cruise-toggle-beep true)
-(def horn-beep true)
-(def find-beep true)
-(def alarm-beep true)
 (def beep-time (systime)) ; when the last beep byte actually went out
 
 ; dash link watchdog: last time a throttle frame was received
@@ -196,7 +77,6 @@
 (def lev-brk 0.0)
 
 ; Ordered taps use three bits per step, first tap in the low bits.
-(def profile-taps 0)
 (def tap-left 0)
 (def tap-key -1) ; wait for neutral at startup and after interruptions
 (def tap-tick 0)
@@ -276,7 +156,6 @@
 ; So an app answer rides along inside the next dash answer: framing is by header
 ; and length, not by transmission, and this halves the number of writes.
 (def app-pend false)
-(def power-pin 0) ; dashboard supply switch: 0 off, 1 ADC1, 2 ADC2
 (def dash-power-held false) ; the pin symbol once it is ours, false otherwise
 (def pend-dev 0)
 (def app-pend2 false)
@@ -302,7 +181,6 @@
 ; Answer third-party apps at all. Transmitting makes the receiver deaf for as
 ; long as the firmware's worker takes to switch it back on, so a connected app
 ; costs lever responsiveness - turn this off to ride with the sharpest throttle.
-(def app-enable false)
 (def cur-cell-mv 0) ; one division, not fifteen per cell read
 (def cur-soh 100)   ; pack health, from the BMS when there is one
 
@@ -356,24 +234,25 @@
 ; so a new setting is one line here and nowhere else.
 (def setting-defs '(
     (ver-code 0 i 0)
-    (software-adc 1 b true)
-    (software-adc2 87 b true)
+    (software-adc 1 b true) ; ADC1 / throttle from the dashboard
+    (software-adc2 87 b true) ; ADC2 / brake from the dashboard
     (tail-off-lock 95 b false)
     (head-off-lock 96 b false)
-    (temp-warning-motor 4 f 80.0)
-    (temp-warning-fet 5 f 80.0)
-    (bms-temp-hi 97 f 50.0)
-    (bms-temp-lo 98 f 0.0)
-    (show-batt-in-idle 6 b false)
+    (temp-warning-motor 4 f 80.0) ; temperature warning for motor in degree celsius
+    (temp-warning-fet 5 f 80.0) ; temperature warning for fet in degree celsius
+    (bms-temp-hi 97 f 50.0) ; pack too hot, from the BMS cell sensors
+    (bms-temp-lo 98 f 0.0) ; pack too cold to charge or pull hard
+    (show-batt-in-idle 6 b false) ; show idle-display instead of speed at idle, normal modes
     (min-speed-kmh 7 f 1.0)
     (secret-start-kmh 115 f 1.0)
     (profile-taps 116 i 0)
     (secret-entry-kmh 117 f 0.0)
+    (bldc-shortcut 118 b false)
     (legal-ramp-seconds 114 f 1.0)
     (alarm-tone 8 b true)
-    (alarm-speed-threshold 9 f 0.5)
-    (alarm-gyro-threshold 10 f 10.0)
-    (alarm-voltage 11 f 24.0)
+    (alarm-speed-threshold 9 f 0.5) ; speed in km/h to trigger alarm
+    (alarm-gyro-threshold 10 f 10.0) ; change in degree/s to trigger alarm
+    (alarm-voltage 11 f 24.0) ; voltage for alarm sound, higher = louder
     (eco-speed-kmh 12 f 7.0)
     (eco-current 13 f 0.6)
     (eco-watts 14 f 400.0)
@@ -405,12 +284,12 @@
     (apply-watts 40 b true)
     (apply-fw 41 b true)
     (secret-presses 42 i 1)
-    (secret-off-presses 89 i 3)
+    (secret-off-presses 89 i 3) ; a gesture that only ever leaves secret, never enters
     (secret-off-combo 90 i 3)
     (secret-off-requires-lock 91 b false)
-    (idle-display 92 i 0)
+    (idle-display 92 i 0) ; 0 battery %, 1 battery V, 2 controller C, 3 motor C
     (secret-combo 43 i 0)
-    (secret-requires-lock 44 b false)
+    (secret-requires-lock 44 b false) ; secret gesture only works while locked
     (lock-presses 45 i 2)
     (lock-combo 46 i 1)
     (mode-presses 51 i 2)
@@ -419,14 +298,14 @@
     (light-combo 54 i 3)
     (light-on-boot 55 b false)
     (button-speed-kmh 56 f 0.1)
-    (boot-mode 57 i 1)
-    (show-batt-idle-secret 58 b false)
+    (boot-mode 57 i 1) ; speed mode applied at boot (1=drive, 2=eco, 4=sport)
+    (show-batt-idle-secret 58 b false) ; same but in secret modes
     (mode-requires-lock 59 b false)
     (light-requires-lock 60 b false)
-    (use-mph 61 b false)
+    (use-mph 61 b false) ; dash shows mph instead of km/h
     (rear-light-enable 62 b false)
-    (auto-taillight 63 b false)
-    (brake-light-mode 64 i 1)
+    (auto-taillight 63 b false) ; taillight on from power on
+    (brake-light-mode 64 i 1) ; 0=off, 1=on while braking, 2=blink while braking
     (eco-om 65 f 1.0)
     (drive-om 66 f 1.0)
     (sport-om 67 f 1.0)
@@ -434,22 +313,22 @@
     (secret-drive-om 69 f 1.0)
     (secret-sport-om 70 f 1.0)
     (apply-om 71 b false)
-    (bms-soc-enable 73 b false)
+    (bms-soc-enable 73 b false) ; battery % from a VESC BMS when one reports
     (cruise-enabled 74 b false)
-    (cruise-delay 75 f 5.0)
-    (cruise-deviation 76 f 1.0)
-    (cruise-min-speed 82 f 5.0)
-    (cruise-max-speed 83 f 35.0)
-    (secret-exit-on-lock 77 b false)
+    (cruise-delay 75 f 5.0) ; seconds of steady speed to activate
+    (cruise-deviation 76 f 1.0) ; km/h window counted as "steady"
+    (cruise-min-speed 82 f 5.0) ; km/h - cruise can only activate at or above this
+    (cruise-max-speed 83 f 35.0) ; km/h - cruise can only activate at or below this
+    (secret-exit-on-lock 77 b false) ; locking drops back to normal modes
     (light-offset-thr 78 f 0.0)
     (light-offset-brk 79 f 0.0)
     (light-gain-thr 80 f 1.0)
     (light-gain-brk 81 f 1.0)
     (app-pin 84 i 0)
-    (taillight-brightness 94 f 0.4)
+    (taillight-brightness 94 f 0.4) ; tail light duty, 0-1
     (app-enable 85 b false)
-    (power-pin 88 i 0)
-    (cruise-allow 93 b false)
+    (power-pin 88 i 0) ; dashboard supply switch: 0 off, 1 ADC1, 2 ADC2
+    (cruise-allow 93 b false) ; master switch - without it nothing can turn cruise on
     (profile-change-beep 99 b true)
     (power-on-beep 100 b true)
     (power-off-beep 101 b true)
@@ -497,6 +376,7 @@
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
     (entry secret-entry-kmh)
+    (commutation bldc-shortcut)
     (taps profile-taps)
     (start secret-start-kmh)
     (ramp legal-ramp-seconds)
@@ -1415,9 +1295,9 @@
         )
 
 
-        (trap (handle-cruise current-speed)) ; experimental - never let it break the loop
+        (if drive-hold (update-drive-hold) (trap (handle-cruise current-speed))) ; experimental - never let it break the loop
 
-        (if (or off lock (not (start-speed-reached current-speed)))
+        (if (or drive-hold off lock (not (start-speed-reached current-speed)))
             (if (not (app-is-output-disabled)) ; Disable output when scooter is turned off
                 {
                     (app-adc-override 0 0)
@@ -1451,7 +1331,7 @@
             (if (= power-pin 1) (app-adc-override 0 0))
             (if (= power-pin 2) (app-adc-override 1 0))
         })
-        (handle-lock (abs current-speed))
+        (if (not drive-hold) (handle-lock (abs current-speed)))
             }
 )
 
@@ -1718,7 +1598,6 @@
 ; pace only short replies are answered and the big blocks wait for a standstill.
 ; The app re-requests what it misses, which the traces show it already does.
 (defun app-speed-01 () (app-clamp16 (* (abs cur-speed-kmh) 10))) ; 0.1 km/h
-(defun app-trip-m () cur-trip)
 (defun app-volt-cv () (app-clamp16 (* cur-vin 100))) ; 0.01 V
 (defun app-amp-ca () (app-clamp16 (* cur-amps 100))) ; 0.01 A, negative = charging
 (defun app-range-10m () (app-clamp16 (* cur-range 100)))
@@ -1849,7 +1728,6 @@
 
 (defun build-app-frame (buf reg n) (build-app-frame-from buf 0 0x20 reg n false))
 
-(defun app-cap-mah () cur-cap)
 
 ; NB_INF_BOOL: bit0 speed limited, bit1 locked, bit2 buzzer, bit11 activated
 (defun app-bool-word ()
@@ -1960,25 +1838,25 @@
 ; block is split out and tested first, so a bulk read does not walk the whole
 ; table 26 times over.
 (defun nb-quick (reg)
-    (cond
-        ((= reg 0xb0) (get-fault))
-        ((= reg 0xb1) (if (> alarm 0) 9 0))
-        ((= reg 0xb2) (app-bool-word))
-        ((= reg 0xb3) (+ (bitwise-and (rnd cur-batt) 0xFF) (shl (bitwise-and (rnd cur-batt) 0xFF) 8)))
-        ((= reg 0xb4) (rnd cur-batt))
-        ((or (= reg 0xb5) (= reg 0xb6)) (app-speed-01))
-        ((= reg 0xb7) (bitwise-and cur-odo 0xFFFF))
-        ((= reg 0xb8) (shr cur-odo 16))
-        ((= reg 0xb9) (app-clamp16 (/ (app-trip-m) 10)))
-        ((= reg 0xba) (to-i (secs-since app-boot-time)))
-        ((= reg 0xbb) (app-fet-01))
-        ((= reg 0xbe) last-alarm-code) ; the alarm that just cleared
-        ((= reg 0xbc) (+ (bitwise-and (rnd cur-maxkmh) 0xFF) ; low: current limit, high: full speed
+    (match (to-i reg)
+        (0xb0 (get-fault))
+        (0xb1 (if (> alarm 0) 9 0))
+        (0xb2 (app-bool-word))
+        (0xb3 (+ (bitwise-and (rnd cur-batt) 0xFF) (shl (bitwise-and (rnd cur-batt) 0xFF) 8)))
+        (0xb4 (rnd cur-batt))
+        (0xb5 (app-speed-01))
+        (0xb6 (app-speed-01))
+        (0xb7 (bitwise-and cur-odo 0xFFFF))
+        (0xb8 (shr cur-odo 16))
+        (0xb9 (app-clamp16 (/ cur-trip 10)))
+        (0xba (to-i (secs-since app-boot-time)))
+        (0xbb (app-fet-01))
+        (0xbe last-alarm-code) ; the alarm that just cleared
+        (0xbc (+ (bitwise-and (rnd cur-maxkmh) 0xFF) ; low: current limit, high: full speed
                          (shl (bitwise-and (rnd cur-maxkmh) 0xFF) 8)))
-        ((= reg 0xbd) (app-clamp16 (* cur-vin cur-amps))) ; W
-        ((= reg 0xbf) (app-range-10m))
-        ((and (>= reg 0xda) (<= reg 0xdf)) (app-word app-cpuid (- reg 0xda))) ; NB_CPUID_A-F
-        (t 0)
+        (0xbd (app-clamp16 (* cur-vin cur-amps))) ; W
+        (0xbf (app-range-10m))
+        (_ (if (and (>= reg 0xda) (<= reg 0xdf)) (app-word app-cpuid (- reg 0xda)) 0)) ; NB_CPUID_A-F
     )
 )
 
@@ -1986,42 +1864,50 @@
 (defun nb-word (reg)
     (if (>= reg 0xb0)
         (nb-quick reg)
-        (cond
-            ((= reg 0x1a) app-ver)
-            ((= reg 0x75) (app-workmode))
-            ((= reg 0x7b) (cond ((= speedmode 1) 1) ((= speedmode 4) 2) (t 0))) ; shows the speed mode
-            ((= reg 0x77) (if unlock 1 0))
-            ((= reg 0x76) (if light 1 0))
-            ((= reg 0x7c) (if (and cruise-allow cruise-enabled) 1 0))
-            ((= reg 0x7d) (if auto-taillight 2 0)) ; the app writes 2 for on
-            ((or (= reg 0x24) (= reg 0x25)) (app-range-10m))
-            ((= reg 0x3a) (to-i (secs-since app-boot-time)))
-            ((and (>= reg 0x10) (< reg 0x17)) (app-word app-serial (- reg 0x10)))
-            ((and (>= reg 0x17) (< reg 0x1a)) (app-word app-pin-buf (- reg 0x17)))
-            ((= reg 0x1b) (get-fault))
-            ((= reg 0x1c) (if (> alarm 0) 9 0)) ; ALARM_CODE_LOCKED
-            ((= reg 0x1d) (app-bool-word))
-            ((= reg 0x1f) (app-workmode))
-            ((= reg 0x22) (rnd cur-batt))
-            ((= reg 0x26) (app-speed-01))
-            ((= reg 0x29) (bitwise-and cur-odo 0xFFFF))
-            ((= reg 0x2a) (shr cur-odo 16))
-            ((= reg 0x2f) (app-clamp16 (/ (app-trip-m) 10)))
-            ((= reg 0x32) (bitwise-and cur-runtime 0xFFFF))
-            ((= reg 0x33) (shr cur-runtime 16))
-            ((= reg 0x3e) (app-fet-01))
-            ((= reg 0x41) (app-clamp16 (* cur-mot 10)))
-            ((= reg 0x46) 0x32) ; apps read this back to recognise a VESC
-            ((or (= reg 0x47) (= reg 0x48)) (app-volt-cv))
-            ((or (= reg 0x49) (= reg 0x53)) (app-amp-ca))
-            ((= reg 0x65) (app-speed-01))
-            ((or (= reg 0x66) (= reg 0x67) (= reg 0x68)) app-ver)
-            ((= reg 0x72) (if (= speedmode 2) 1 0)) ; limiter flag, not a limit
-            ((or (= reg 0x73) (= reg 0x74)) (app-clamp16 (* cur-maxkmh 10)))
-            ((= reg 0x7a) (if light 1 0))
-            ((= reg 0x90) (if light 1 0))
-            ((or (= reg 0x91) (= reg 0x92)) (if alarm-tone 1 0))
-            (t 0)
+        (match (to-i reg)
+            (0x1a app-ver)
+            (0x75 (app-workmode))
+            (0x7b (cond ((= speedmode 1) 1) ((= speedmode 4) 2) (t 0))) ; shows the speed mode
+            (0x77 (if unlock 1 0))
+            (0x76 (if light 1 0))
+            (0x7c (if (and cruise-allow cruise-enabled) 1 0))
+            (0x7d (if auto-taillight 2 0)) ; the app writes 2 for on
+            (0x24 (app-range-10m))
+            (0x25 (app-range-10m))
+            (0x3a (to-i (secs-since app-boot-time)))
+            (0x1b (get-fault))
+            (0x1c (if (> alarm 0) 9 0)) ; ALARM_CODE_LOCKED
+            (0x1d (app-bool-word))
+            (0x1f (app-workmode))
+            (0x22 (rnd cur-batt))
+            (0x26 (app-speed-01))
+            (0x29 (bitwise-and cur-odo 0xFFFF))
+            (0x2a (shr cur-odo 16))
+            (0x2f (app-clamp16 (/ cur-trip 10)))
+            (0x32 (bitwise-and cur-runtime 0xFFFF))
+            (0x33 (shr cur-runtime 16))
+            (0x3e (app-fet-01))
+            (0x41 (app-clamp16 (* cur-mot 10)))
+            (0x46 0x32) ; apps read this back to recognise a VESC
+            (0x47 (app-volt-cv))
+            (0x48 (app-volt-cv))
+            (0x49 (app-amp-ca))
+            (0x53 (app-amp-ca))
+            (0x65 (app-speed-01))
+            (0x66 app-ver)
+            (0x67 app-ver)
+            (0x68 app-ver)
+            (0x72 (if (= speedmode 2) 1 0)) ; limiter flag, not a limit
+            (0x73 (app-clamp16 (* cur-maxkmh 10)))
+            (0x74 (app-clamp16 (* cur-maxkmh 10)))
+            (0x7a (if light 1 0))
+            (0x90 (if light 1 0))
+            (0x91 (if alarm-tone 1 0))
+            (0x92 (if alarm-tone 1 0))
+            (_ (cond
+                ((and (>= reg 0x10) (< reg 0x17)) (app-word app-serial (- reg 0x10)))
+                ((and (>= reg 0x17) (< reg 0x1a)) (app-word app-pin-buf (- reg 0x17)))
+                (t 0)))
         )
     )
 )
@@ -2088,29 +1974,32 @@
 )
 
 (defun xm-bms-word (reg)
-    (cond
-        ((and (>= reg 0x10) (< reg 0x17)) (app-word app-serial (- reg 0x10)))
-        ((= reg 0x17) app-ver)
-        ((or (= reg 0x18) (= reg 0x19)) (app-cap-mah)) ; design, then measured
-        ((= reg 0x1a) 3600) ; nominal cell voltage, mV
-        ((= reg 0x20) 0x3021) ; 7 bit year from 2000, 4 bit month, 5 bit day
+    (match (to-i reg)
+        (0x17 app-ver)
+        (0x18 cur-cap)
+        (0x19 cur-cap)
+        (0x1a 3600) ; nominal cell voltage, mV
+        (0x20 0x3021) ; 7 bit year from 2000, 4 bit month, 5 bit day
         ; bit0 config valid, bit6 charging. A pack answering zero here reads as
         ; an unconfigured BMS, which is what this used to send.
-        ((= reg 0x30) (if (< cur-amps 0) 65 1))
-        ((= reg 0x31) (app-clamp16 (/ (* cur-batt cur-cap) 100)))
-        ((= reg 0x32) (rnd cur-batt))
-        ((= reg 0x33) (app-amp-ca))
-        ((= reg 0x34) (app-volt-cv))
-        ((= reg 0x35) (let ((tc (bitwise-and (+ (rnd cur-fet) 20) 0xFF))) ; both sensors +20
+        (0x30 (if (< cur-amps 0) 65 1))
+        (0x31 (app-clamp16 (/ (* cur-batt cur-cap) 100)))
+        (0x32 (rnd cur-batt))
+        (0x33 (app-amp-ca))
+        (0x34 (app-volt-cv))
+        (0x35 (let ((tc (bitwise-and (+ (rnd cur-fet) 20) 0xFF))) ; both sensors +20
                           (+ tc (shl tc 8))))
-        ((= reg 0x3b) cur-soh) ; health
+        (0x3b cur-soh) ; health
         ; the block holds fifteen cells and a pack that has fewer leaves the rest
         ; at zero - so report as many as the VESC is configured for, not ten
-        ((and (>= reg 0x40) (< reg 0x4f) (< (- reg 0x40) cur-cells))
+        (_ (cond
+            ((and (>= reg 0x10) (< reg 0x17)) (app-word app-serial (- reg 0x10)))
+            ((and (>= reg 0x40) (< reg 0x4f) (< (- reg 0x40) cur-cells))
             (app-cell-mv (- reg 0x40)))
-        (t 0)
+            (t 0)))
     )
 )
+
 
 
 ; One app frame, either protocol. Xiaomi puts the payload a byte earlier and its
@@ -2358,6 +2247,62 @@
 
 (defun lock-if-stopped () (if (at-standstill) (toggle-lock)))
 
+(defun drive-idle ()
+    (and (not off) (not lock) (not cruising) (eq calib-stage 'idle)
+         (at-standstill) (<= (abs (get-rpm)) 2) (<= (abs (get-current)) 0.5)
+         (<= (abs (get-duty)) 0.01) (= (get-fault) 0)
+         (app-adc-range-ok) (= (gesture-levers true) 0)
+         (or (not software-adc) (<= thr-corr-v (conf-get 'adc-v1-start)))
+         (= (get-adc-decoded 0) 0) (= (get-adc-decoded 1) 0)))
+
+(defun drive-pair (mode dir)
+    (and (= (conf-get 'motor-type) mode) (= (conf-get 'm-invert-direction) dir)))
+
+(defun write-drive (mode dir)
+    (eq (trap (and (app-is-output-disabled) (drive-idle)
+                   (conf-set 'm-invert-direction dir) (conf-set 'motor-type mode)
+                   (drive-pair mode dir))) '(exit-ok t)))
+
+; Slot 119 records the original pair before the two live config writes.
+; A script restart between writes must keep the ADC output disabled.
+(defun guard-drive () { (setq drive-hold 'blocked) (app-disable-output -1) (set-current-rel 0) })
+(defun drive-mark (value)
+    (and (eeprom-store-i 119 value) (= (or (eeprom-read-i 119) -1) value)))
+(defun finish-drive ()
+    (if (drive-mark 0) { (setq drive-tick (systime)) (setq drive-hold 'neutral) }))
+
+(defun resume-drive ()
+    (let ((mark (eeprom-read-i 119)))
+        (if (and mark (>= mark 19760) (<= mark 19763)) {
+            (guard-drive)
+            (var mode (bitwise-and mark 2))
+            (var dir (bitwise-and mark 1))
+            (if (or (drive-pair mode dir) (drive-pair (- 2 mode) (- 1 dir)))
+                (finish-drive))
+        })))
+
+(defun switch-drive ()
+    (if (and bldc-shortcut (not drive-hold) (not (can-list-devs)) (drive-idle))
+        (let ((mode (conf-get 'motor-type)) (dir (conf-get 'm-invert-direction)))
+            (if (and (member mode '(0 2)) (member dir '(0 1))) {
+                (guard-drive)
+                (var mark (+ 19760 mode dir))
+                (var changed (and (drive-mark mark)
+                                  (write-drive (- 2 mode) (- 1 dir))))
+                (if (or changed (drive-pair mode dir) (write-drive mode dir))
+                    (finish-drive))
+                (send-data (cond ((eq drive-hold 'blocked) "drive Check motor settings; output disabled")
+                                 ((not changed) "drive Switch cancelled")
+                                 ((= mode 2) "drive BLDC")
+                                 (t "drive FOC")))
+            }))))
+
+(defun update-drive-hold ()
+    (if (eq drive-hold 'neutral)
+        (if (drive-idle)
+            (if (> (secs-since drive-tick) 0.5) (setq drive-hold nil))
+            (setq drive-tick (systime)))))
+
 (defun gesture-action (n mask)
     (if (>= mask 0)
         (let ((combo (ix '(3 1 2 0) mask)))
@@ -2371,7 +2316,8 @@
                 ((and (= n mode-presses) (= combo mode-combo)
                       (eq mode-requires-lock lock)) cycle-mode)
                 ((and (= n light-presses) (= combo light-combo)
-                      (eq light-requires-lock lock)) toggle-light)))))
+                      (eq light-requires-lock lock)) toggle-light)
+                ((and bldc-shortcut (= n 4) (= mask 0)) switch-drive)))))
 
 (defun handle-button ()
     (if (and off (= presses 1))
@@ -2469,9 +2415,9 @@
 (defun start-alarm()
     (if (= alarm 0)
         {
-            (set 'alarm 1)
-            (set 'last-alarm-code 9) ; ALARM_CODE_LOCKED, kept for 0xBE
-            (set 'alarm-time (systime))
+            (setq alarm 1)
+            (setq last-alarm-code 9) ; ALARM_CODE_LOCKED, kept for 0xBE
+            (setq alarm-time (systime))
             (print "Alarm started")
         }
     )
@@ -2480,7 +2426,7 @@
 (defun stop-alarm()
     (if (> alarm 0)
         {
-            (set 'alarm 0)
+            (setq alarm 0)
             (set-brake-rel 0)
             (stop-tone)
             (print "Alarm stopped")
@@ -2545,7 +2491,7 @@
                     (if alarm-tone
                         (play-tone 0 4000 alarm-voltage)
                     )
-                    (if alarm-beep (set 'feedback 1))
+                    (if alarm-beep (setq feedback 1))
                 }
             )
             ((= alarm 3) ; second tone
@@ -2553,7 +2499,7 @@
                     (if alarm-tone
                         (play-tone 2 7000 alarm-voltage)
                     )
-                    (if alarm-beep (set 'feedback 1))
+                    (if alarm-beep (setq feedback 1))
                 }
             )
             ((= alarm 6) ; third tone
@@ -2561,7 +2507,7 @@
                     (if alarm-tone
                         (play-tone 1 2000 alarm-voltage)
                     )
-                    (if alarm-beep (set 'feedback 1))
+                    (if alarm-beep (setq feedback 1))
                 }
 
             )
@@ -2570,22 +2516,22 @@
                     (if alarm-tone
                         (stop-tone)
                     )
-                    (if alarm-beep (set 'feedback 1))
-                    (set 'alarm 1) ; reset alarm to 1
+                    (if alarm-beep (setq feedback 1))
+                    (setq alarm 1) ; reset alarm to 1
                 }
             )
         )
 
         ; count up alarm state
         (if (> alarm 0)
-            (set 'alarm (+ alarm 1))
+            (setq alarm (+ alarm 1))
         )
     }
 )
 
 (defun play-tone(channel freq voltage)
     {
-        (foc-play-tone channel freq voltage)
+        (if (= (conf-get 'motor-type) 2) (foc-play-tone channel freq voltage))
         (loopforeach id (can-devs)
             (rcode-run-noret id `(foc-play-tone ,channel ,freq ,voltage))
         )
@@ -2594,7 +2540,7 @@
 
 (defun stop-tone()
     {
-        (foc-play-stop)
+        (if (= (conf-get 'motor-type) 2) (foc-play-stop))
         (loopforeach id (can-devs)
             (rcode-run-noret id '(foc-play-stop))
         )
@@ -2604,8 +2550,8 @@
 (defun can-devs ()
     {
         (if (> (secs-since can-ids-time) 0.5) {
-            (set 'can-ids-time (systime))
-            (set 'can-ids (can-list-devs))
+            (setq can-ids-time (systime))
+            (setq can-ids (can-list-devs))
         })
         can-ids
     }
@@ -2629,7 +2575,7 @@
                     (trap (loopforeach i (can-devs)
                         (let ((v (abs (canget-rpm i))))
                             { (if (< v lo) (setq lo v)) (if (> v hi) (setq hi v)) })))
-                    (if (and (> lo 0) (> (- hi lo) slip-erpm)) (set 'slip-time (systime)))
+                    (if (and (> lo 0) (> (- hi lo) slip-erpm)) (setq slip-time (systime)))
                 }
             )
         )
@@ -2763,6 +2709,7 @@
 )
 
 (defun main () {
+        (resume-drive)
         (load-settings)
 
         (event-register-handler (spawn event-handler))
@@ -2896,6 +2843,18 @@
 })
 
 @const-end
+
+; Initialize the named settings from the same defaults used by reset and AppUi.
+; The speed aliases above have their own runtime units.
+(loopforeach row setting-defs
+    (let ((name (first row)) (value (ix row 3)))
+        (if (not (or (eq name 'ver-code) (member name speed-settings)))
+            (eval (list 'def name
+                (if (member name '(temp-warning-motor temp-warning-fet bms-temp-hi bms-temp-lo
+                                   alarm-gyro-threshold alarm-voltage eco-watts eco-fw drive-watts drive-fw
+                                   sport-watts sport-fw secret-eco-watts secret-eco-fw secret-drive-watts
+                                   secret-drive-fw secret-sport-watts secret-sport-fw))
+                    (to-i value) value))))))
 
 ; Without an image the firmware reparses the whole script on every boot, and it
 ; rewrites the const heap from the same base pointer each time - the second boot

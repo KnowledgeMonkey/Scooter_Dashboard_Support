@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 
-def program(source, saved):
+def program(source, saved, suite=None):
     source = source[:source.rindex('(def img-ok true)')]
     source = source.replace('@const-start', '').replace('@const-end', '')
     source = re.sub(r'^\(import .*$', '', source, flags=re.M)
@@ -371,7 +371,7 @@ def program(source, saved):
             interrupted-hold-blocked valid-hold-entry early-tap-blocked interrupted-taps-blocked
             valid-tap-entry tap-exit-ok manual-entry-blocked control-entry-ok protocol-entry-ok zero-restores-entry))
 '''
-    return mocks + source + assertions
+    return mocks + source + (suite if suite is not None else assertions)
 
 
 def main():
@@ -383,16 +383,18 @@ def main():
     source = (root / 'scooter_support.lisp').read_text()
     # Repository-local temporary files also work in restricted build environments.
     with tempfile.TemporaryDirectory(prefix='startup-', dir=root) as directory:
-        for name, saved in [('empty', '()'), ('existing', '((0 . 420i32) (37 . 0) (7 . 5.0) (99 . 0))')]:
+        for name, saved in [('empty', '()'), ('existing', '((0 . 420i32) (37 . 0) (7 . 5.0) (99 . 0))'),
+                            ('motor shortcut', '()')]:
             path = Path(directory) / f'{name}.lisp'
-            path.write_text(program(source, saved))
+            suite = (root / "tools/test_drive_shortcut.lisp").read_text() if name == "motor shortcut" else None
+            path.write_text(program(source, saved, suite))
             result = subprocess.run([str(runner), '-h', '100000', '-t', '10', str(path)],
                                     text=True, errors="replace", capture_output=True, timeout=20)
             output = result.stdout + result.stderr
             # Upstream's test runner exit code is not a conventional pass/fail code.
             if '\nSUCCESS\n' not in output or 'Error:' in output:
                 raise SystemExit(f'LispBM startup failed ({name}):\n{output}')
-            print(f'LispBM startup, settings, legal ramp, braking, profile switches and ordered taps: {name} OK')
+            print(f'LispBM dashboard tests: {name} OK')
 
 
 if __name__ == '__main__':

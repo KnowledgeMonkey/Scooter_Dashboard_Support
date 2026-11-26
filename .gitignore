@@ -6,6 +6,7 @@ tools/*
 !tools/check_lisp.py
 !tools/check_packaged_ui.py
 !tools/test_legal_ramp.py
+!tools/test_drive_shortcut.lisp
 !tools/pkg_readme.py
 !tools/pad_lisp.py
 !tools/svg_to_canvas.py

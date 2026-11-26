@@ -93,6 +93,11 @@ Lock, mode switching, headlight, secret mode and leaving secret mode are fully r
   are never accepted with the wheel turning, whatever that is set to
 - A gesture whose combination does not include a lever still needs that lever released to
   match, so let go of the throttle for those
+- **4 taps at standstill: FOC / BLDC** is off by default. For a single controller with
+  both motor modes already set up, stop, release both levers and tap the power button
+  four times. Each switch flips the current **Invert Motor Direction** setting. A full
+  round trip restores the original direction. The motor settings last until a power
+  cycle. Existing gestures assigned to the same taps take priority.
 - Turning the scooter on always works, regardless of mapping
 
 ### 🔒 Lock & alarm
