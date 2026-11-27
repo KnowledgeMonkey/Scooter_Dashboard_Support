@@ -93,11 +93,16 @@ Lock, mode switching, headlight, secret mode and leaving secret mode are fully r
   are never accepted with the wheel turning, whatever that is set to
 - A gesture whose combination does not include a lever still needs that lever released to
   match, so let go of the throttle for those
-- **4 taps at standstill: FOC / BLDC** is off by default. For a single controller with
-  both motor modes already set up, stop, release both levers and tap the power button
-  four times. Each switch flips the current **Invert Motor Direction** setting. A full
-  round trip restores the original direction. The motor settings last until a power
-  cycle. Existing gestures assigned to the same taps take priority.
+- **FOC / BLDC** is a separate binding under Headlight. Choose the levers, lock state
+  and number of power-button presses, or choose **Hold** for levers alone. At standstill,
+  perform the gesture and release both levers within two seconds. The controller verifies
+  the switch and waits at least one second before enabling drive. The G30 flashes red
+  **81** for BLDC or **82** for FOC. AppUi shows red **DC** or **FC**. Alarms and controller
+  faults take priority on the dash.
+- This binding is off by default. An enabled four-tap shortcut carries over. Use it
+  on a single controller with both motor modes configured. Each switch flips **Invert
+  Motor Direction**. A power cycle reloads the saved motor settings. Existing bindings
+  take priority if they share the gesture.
 - Turning the scooter on always works, regardless of mapping
 
 ### 🔒 Lock & alarm

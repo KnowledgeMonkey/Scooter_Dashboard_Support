@@ -27,6 +27,16 @@ def main():
     harness = """import QtQuick 2.7
 Item {
     anchors.fill: parent
+    property var probe
+    Timer {
+        id: checkExpiry
+        interval: 1250
+        onTriggered: {
+            if (probe && !probe.visible) console.log("PACKAGE_DIAL_VISIBLE")
+            else console.error("Motor indicator did not clear")
+            Qt.quit()
+        }
+    }
     property var dashboard
     Component.onCompleted: dashboard = Qt.createQmlObject(SOURCE, parent, "AppUi")
     Timer {
@@ -78,13 +88,26 @@ Item {
                     }
                     return null
                 }
-                const shortcut = findField(dashboard, "bldcShortcut")
-                if (!shortcut || shortcut.checked) throw new Error("Motor shortcut default")
+                const presses = findField(dashboard, "drivePresses")
+                const brake = findField(dashboard, "driveBrake")
+                const throttle = findField(dashboard, "driveThrottle")
+                const locked = findField(dashboard, "driveLocked")
+                if (!presses || presses.currentText !== "Off") throw new Error("Motor binding default")
                 dashboard.cfgImport(previous + "\\ncommutation true")
-                if (!shortcut.checked || dashboard.cfgExport().indexOf("commutation true") < 0)
-                    throw new Error("Motor shortcut settings round trip")
-                dashboard.applySettingsLine("commutation false")
-                if (shortcut.checked) throw new Error("Motor shortcut disable")
+                if (presses.currentText !== "4" || brake.checked || throttle.checked || locked.checked)
+                    throw new Error("Old four-tap shortcut migration")
+                dashboard.cfgImport(previous + "\\ncommutation true 0 1 true")
+                if (presses.currentText !== "Hold" || !brake.checked || throttle.checked || !locked.checked
+                        || dashboard.cfgExport().indexOf("commutation true 0 1 true") < 0)
+                    throw new Error("Motor binding backup round trip")
+                dashboard.applySettingsLine("commutation false 4 3 false")
+                if (presses.currentText !== "Off") throw new Error("Motor binding disable")
+                probe = findField(dashboard, "driveCode")
+                dashboard.showDriveMessage("drive BLDC")
+                if (!probe.visible || probe.text !== "DC" || probe.color.r <= probe.color.g)
+                    throw new Error("Red BLDC indicator")
+                dashboard.showDriveMessage("drive FOC")
+                if (!probe.visible || probe.text !== "FC") throw new Error("FOC indicator")
                 const field = findField(dashboard, "secretEntrySpeed")
                 dashboard.cfgImport(previous + "\\nentry 3.0")
                 if (!field || field.text !== "3" || dashboard.cfgExport().indexOf("entry 3.0") < 0)
@@ -95,9 +118,8 @@ Item {
                 dashboard.applySettingsLine("entry 3.0")
                 if (field.text !== "1.86" || Number(dashboard.readSpeed(field, 1)) !== 3)
                     throw new Error("Secret entry speed in mph")
-                console.log("PACKAGE_DIAL_VISIBLE")
-            } catch (e) { console.error(e) }
-            Qt.quit()
+                checkExpiry.start()
+            } catch (e) { console.error(e); Qt.quit() }
         }
     }
 }""".replace("SOURCE", json.dumps(code))

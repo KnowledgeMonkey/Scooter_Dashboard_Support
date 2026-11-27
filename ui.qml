@@ -42,6 +42,36 @@ Item {
     readonly property color cWarnInk:  darkUi ? "#ff8a80" : "#a3201a"
     readonly property color cWarnTint: darkUi ? "#8e3b3b" : "#e8a9a5"
 
+    function showDriveMessage(message) {
+        if (message === "drive BLDC" || message === "drive FOC") {
+            driveCode.text = message === "drive BLDC" ? "DC" : "FC"
+            driveNoticeTimer.restart()
+        } else {
+            driveNoticeTimer.stop()
+            VescIf.emitStatusMessage(message.slice(6), false)
+        }
+    }
+
+    Rectangle {
+        anchors.centerIn: parent
+        z: 100
+        visible: driveNoticeTimer.running
+        color: root.cDeep
+        border.color: root.cEdge
+        radius: 12
+        width: driveCode.implicitWidth + 48
+        height: driveCode.implicitHeight + 20
+        Label {
+            id: driveCode
+            objectName: "driveCode"
+            anchors.centerIn: parent
+            font.bold: true
+            font.pixelSize: 52
+            color: root.darkUi ? "#ff625e" : "#b32626"
+        }
+    }
+    Timer { id: driveNoticeTimer; interval: 1000 }
+
     property int loadedModel: -1
     // Read straight off the controller with getDecodedAdc, so the pin voltages
     // cost the script nothing - it is already near the const-heap ceiling.
@@ -923,7 +953,9 @@ Item {
 
         saveGroup("start", [Math.max(0, readSpeed(secretStartSpeed, 1))])
         saveGroup("entry", [Math.max(0, readSpeed(secretEntrySpeed, 1))])
-        saveGroup("commutation", [boolAtom(bldcShortcut)])
+        saveGroup("commutation", [drivePresses.currentIndex > 0 ? "true" : "false",
+            drivePresses.currentIndex > 0 ? drivePresses.currentIndex - 1 : 4,
+            comboFromBoxes(driveBrake, driveThrottle), boolAtom(driveLocked)])
         saveGroup("taps", [packTaps()])
         saveGroup("ramp", [Math.max(0, Math.min(10, readReal(legalRamp, 2)))])
         saveGroup("sound", [boolAtom(profileChangeBeep)])
@@ -1000,6 +1032,8 @@ Item {
             var line = found[cfgKeys[k]]
             if (line === undefined)
                 continue
+            if (cfgKeys[k] === "commutation" && line.split(" ").length === 2)
+                line += " 4 3 false"
             var known = cfgLines[cfgKeys[k]]
             if (known !== undefined
                     && line.split(" ").length !== known.split(" ").length) {
@@ -1035,7 +1069,10 @@ Item {
             appEnable.checked = parseBoolToken(parts[6])
             idleDisplay.currentIndex = Number.parseInt(parts[7]) || 0
         } else if (parts[0] === "commutation") {
-            bldcShortcut.checked = parseBoolToken(parts[1])
+            const n = parts.length > 2 ? Number(parts[2]) : 4
+            drivePresses.currentIndex = parseBoolToken(parts[1]) && n >= 0 && n <= 5 ? 1 + n : 0
+            setBoxesFromCombo(parts.length > 3 ? Number(parts[3]) : 3, driveBrake, driveThrottle)
+            driveLocked.checked = parseBoolToken(parts[4])
         } else if (parts[0] === "entry") {
             setSpeed(secretEntrySpeed, parts[1], 2)
         } else if (parts[0] === "start") {
@@ -2928,6 +2965,43 @@ Item {
                                     }
                                 }
 
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 8
+                                    spacing: 4
+
+                                    Label { text: "FOC / BLDC"; font.bold: true; Layout.bottomMargin: 3 }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        CheckBox { id: driveBrake; objectName: "driveBrake"; onToggled: if (drivePresses.currentIndex === 1 && !driveBrake.checked && !driveThrottle.checked) drivePresses.currentIndex = 0; text: "Brake"; spacing: 4; topPadding: 0; bottomPadding: 0; leftPadding: 14; rightPadding: 14; indicator: Item { } background: Rectangle { radius: 9; implicitHeight: 36; color: parent.checked ? root.cAccentBg2 : root.cCard; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } } contentItem: Label { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; font.weight: Font.DemiBold; font.pointSize: root.titleSize * 0.95; color: parent.checked ? root.cAccent : root.cDim } }
+                                        CheckBox { id: driveThrottle; objectName: "driveThrottle"; onToggled: if (drivePresses.currentIndex === 1 && !driveBrake.checked && !driveThrottle.checked) drivePresses.currentIndex = 0; text: "Throttle"; spacing: 4; topPadding: 0; bottomPadding: 0; leftPadding: 14; rightPadding: 14; indicator: Item { } background: Rectangle { radius: 9; implicitHeight: 36; color: parent.checked ? root.cAccentBg2 : root.cCard; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } } contentItem: Label { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; font.weight: Font.DemiBold; font.pointSize: root.titleSize * 0.95; color: parent.checked ? root.cAccent : root.cDim } }
+                                        CheckBox { id: driveLocked; objectName: "driveLocked"; text: "Locked"; spacing: 4; topPadding: 0; bottomPadding: 0; leftPadding: 14; rightPadding: 14; indicator: Item { } background: Rectangle { radius: 9; implicitHeight: 36; color: parent.checked ? root.cAccentBg2 : root.cCard; opacity: parent.enabled ? 1 : 0.45; Behavior on color { ColorAnimation { duration: 140 } } } contentItem: Label { text: parent.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight; font.weight: Font.DemiBold; font.pointSize: root.titleSize * 0.95; color: parent.checked ? root.cAccent : root.cDim } }
+                                        Item { Layout.fillWidth: true }
+                                        ComboBox {
+                                            id: drivePresses
+                                            objectName: "drivePresses"
+                                            onActivated: if (index === 1 && !driveBrake.checked && !driveThrottle.checked) driveBrake.checked = true
+                                            Layout.preferredWidth: 72
+                                            model: ["Off", "Hold", "1", "2", "3", "4", "5"]
+                                            currentIndex: 0
+                                            background: Rectangle { radius: 10; color: root.cCtl; implicitHeight: 34 }
+                                            popup.background: Rectangle { radius: 12; color: root.cCard; border.width: 1; border.color: root.cEdge }
+                                            popup.padding: 6
+                                            popup.height: popup.contentItem.implicitHeight + 12
+                                            topInset: 0
+                                            bottomInset: 0
+                                            topPadding: 0
+                                            bottomPadding: 0
+                                            implicitHeight: 34
+                                            font.weight: Font.Normal; font.pointSize: root.titleSize * 0.95
+                                            Component.onCompleted: { popup.contentItem.boundsBehavior = Flickable.StopAtBounds; popup.contentItem.interactive = false }
+                                            delegate: comboItem
+                                        }
+                                    }
+                                }
+
                                                                                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     Layout.topMargin: 8
@@ -3027,13 +3101,6 @@ Item {
                                 }
 
                                 Label { text: "Each gesture is a number of power button presses with the listed levers held down at the same time."; opacity: 0.6; font.pointSize: root.titleSize * 0.85; wrapMode: Text.WordWrap; Layout.fillWidth: true; Layout.topMargin: 6; Layout.bottomMargin: 6 }
-
-                                CheckBox {
-                                    id: bldcShortcut
-                                    objectName: "bldcShortcut"
-                                    text: "4 taps at standstill: FOC / BLDC"
-                                    Layout.fillWidth: true
-                                }
 
                                 RowLayout {
                                     Layout.fillWidth: true
@@ -4139,7 +4206,7 @@ Item {
             }
 
             if (message.startsWith("drive ")) {
-                VescIf.emitStatusMessage(message.slice(6), message === "drive BLDC" || message === "drive FOC")
+                root.showDriveMessage(message)
             } else if (settingsMsgs.indexOf(message.split(" ")[0]) >= 0) {
                 applySettingsLine(message)
             } else if (message === "model-ok") {

@@ -21,6 +21,8 @@
 (def secret-sport-speed (/ 1000 3.6)) ; 1000 km/h easy
 (def drive-hold nil)
 (def drive-tick 0)
+(def drive-notice 0)
+(def drive-notice-time 0)
 (def entry-click-ok true)
 (def entry-hold-ok true)
 (def slip-erpm 1200.0) ; wheel spread that counts as slip, from VESC's own at boot
@@ -248,6 +250,9 @@
     (profile-taps 116 i 0)
     (secret-entry-kmh 117 f 0.0)
     (bldc-shortcut 118 b false)
+    (drive-presses 120 i 4)
+    (drive-combo 121 i 3)
+    (drive-locked 122 b false)
     (legal-ramp-seconds 114 f 1.0)
     (alarm-tone 8 b true)
     (alarm-speed-threshold 9 f 0.5) ; speed in km/h to trigger alarm
@@ -376,7 +381,7 @@
     (cruise cruise-allow cruise-delay cruise-deviation cruise-min-speed cruise-max-speed)
     (alarm alarm-tone alarm-speed-threshold alarm-gyro-threshold alarm-voltage)
     (entry secret-entry-kmh)
-    (commutation bldc-shortcut)
+    (commutation bldc-shortcut drive-presses drive-combo drive-locked)
     (taps profile-taps)
     (start secret-start-kmh)
     (ramp legal-ramp-seconds)
@@ -458,6 +463,7 @@
 
 (defun load-settings ()
     {
+        (if (eq drive-hold 'release) (wait-drive 'neutral))
         ; Installing the package stamps the version and puts the model back to
         ; Slave. Nothing else is touched: an empty slot already reads back as its
         ; default, and a controller that ran another package keeps whatever that
@@ -490,18 +496,18 @@
             (setq digits (shr digits 3))
         })
         ; the Control tab switch is persisted on its own, outside any group
-        (set 'cruise-enabled (let ((v (read-setting 'cruise-enabled))) (if (eq v 'unset) cruise-enabled v)))
+        (setq cruise-enabled (let ((v (read-setting 'cruise-enabled))) (if (eq v 'unset) cruise-enabled v)))
         ; these divide, so an unwritten slot has to come back as its default and
         ; not as nil - setting-def is what guarantees that
-        (set 'min-speed (setting-def 'min-speed-kmh))
-        (if (< min-speed 0) (set 'min-speed 0.0))
+        (setq min-speed (setting-def 'min-speed-kmh))
+        (if (< min-speed 0) (setq min-speed 0.0))
         ; Snapshot the old shared value once, even when it equals the table default.
         (if (eq (read-setting 'secret-start-kmh) 'unset)
             (eeprom-store-f (first (assoc setting-defs 'secret-start-kmh)) min-speed))
-        (set 'secret-start-speed (setting-def 'secret-start-kmh))
-        (if (< secret-start-speed 0) (set 'secret-start-speed 0.0))
+        (setq secret-start-speed (setting-def 'secret-start-kmh))
+        (if (< secret-start-speed 0) (setq secret-start-speed 0.0))
         (if (not (and (>= legal-ramp-seconds 0.0) (<= legal-ramp-seconds 10.0)))
-            (set 'legal-ramp-seconds 0.0))
+            (setq legal-ramp-seconds 0.0))
         (reset-legal-ramp)
         (loopforeach pair '((eco-speed . eco-speed-kmh) (drive-speed . drive-speed-kmh)
                 (sport-speed . sport-speed-kmh) (secret-eco-speed . secret-eco-speed-kmh)
@@ -510,15 +516,15 @@
             (set (car pair) (/ (setting-def (cdr pair)) 3.6)))
         ; adc-input divides by these every lever frame, so a zero from a bad save
         ; or a corrupt cell must never reach it
-        (if (< light-gain-thr 0.05) (set 'light-gain-thr 1.0))
-        (if (< light-gain-brk 0.05) (set 'light-gain-brk 1.0))
+        (if (< light-gain-thr 0.05) (setq light-gain-thr 1.0))
+        (if (< light-gain-brk 0.05) (setq light-gain-brk 1.0))
 
         (var m (read-setting 'model))
         (if (not (valid-model m)) { ; never stored, or out of range - Slave drives nothing
             (setq m 2)
             (write-setting 'model m)
         })
-        (set 'model m)
+        (setq model m)
     }
 )
 
@@ -544,7 +550,7 @@
             ; the calibration sequencer only runs on dashboard lever frames, so a
             ; run left open when both channels are switched off would never finish
             (if (and (not software-adc) (not software-adc2) (not (eq calib-stage 'idle))) {
-                (set 'calib-stage 'idle)
+                (setq calib-stage 'idle)
                 (send-data "calib-aborted")
             })
         }
@@ -564,11 +570,11 @@
                 (if dash-power-held (gpio-configure dash-power-held 'pin-mode-analog))
                 (gpio-write pin (if off 0 1))
                 (gpio-configure pin 'pin-mode-out)
-                (set 'dash-power-held pin)
+                (setq dash-power-held pin)
             })
             (if dash-power-held {
                 (gpio-configure dash-power-held 'pin-mode-analog)
-                (set 'dash-power-held false)
+                (setq dash-power-held false)
             })
         )
     )
@@ -587,7 +593,7 @@
             (if rear-light-enable
                 (if (not pwm-started) {
                     (pwm-start 200 0)
-                    (set 'pwm-started true)
+                    (setq pwm-started true)
                 })
                 (if pwm-started (pwm-set-duty 0.0))
             )
@@ -603,7 +609,7 @@
         (var i 0)
         (loopforeach n (assoc setting-groups g)
             {
-                (write-setting n (ix vals i))
+                (if (< i (length vals)) (write-setting n (ix vals i)))
                 (setq i (+ i 1))
             }
         )
@@ -647,12 +653,12 @@
 )
 
 (defun ctrl-light (on)
-    (set 'light on) ; allowed while locked too, like secret/mode from the app
+    (setq light on) ; allowed while locked too, like secret/mode from the app
 )
 
 (defun ctrl-mode (m)
     (if (or (= m 1) (= m 2) (= m 4)) {
-        (set 'speedmode m)
+        (setq speedmode m)
         (apply-mode)
     })
 )
@@ -667,7 +673,7 @@
 ; survives a reboot, and cancels any active hold when switched off.
 (defun ctrl-cruise (on)
     {
-        (set 'cruise-enabled (and on cruise-allow))
+        (setq cruise-enabled (and on cruise-allow))
         (write-setting 'cruise-enabled cruise-enabled)
         (if (not cruise-enabled) (cruise-cancel))
     }
@@ -677,31 +683,31 @@
 ; the light as configured, not whatever was set before the last power off.
 (defun boot-state ()
     {
-        (set 'speedmode (if (or (= boot-mode 1) (= boot-mode 2) (= boot-mode 4)) boot-mode 4))
-        (set 'light light-on-boot)
-        (set 'app-boot-time (systime))
-        (set 'base-dist (get-dist-abs))
-        (set 'base-wh (setup-wh))
-        (set 'base-wh-chg (setup-wh-chg))
+        (setq speedmode (if (or (= boot-mode 1) (= boot-mode 2) (= boot-mode 4)) boot-mode 4))
+        (setq light light-on-boot)
+        (setq app-boot-time (systime))
+        (setq base-dist (get-dist-abs))
+        (setq base-wh (setup-wh))
+        (setq base-wh-chg (setup-wh-chg))
     }
 )
 
 (defun ctrl-power (on)
     (if on
         (if off {
-            (set 'off false)
-            (if power-on-beep (set 'feedback 1))
-            (set 'unlock false)
+            (setq off false)
+            (if power-on-beep (setq feedback 1))
+            (setq unlock false)
             (boot-state)
             (apply-mode)
             (stats-reset)
         })
         (if (and (not off) (not lock) (<= (abs (get-speed)) 1.0)) {
-            (set 'light false)
-            (if power-off-beep (set 'feedback 1))
-            (set 'unlock false)
+            (setq light false)
+            (if power-off-beep (setq feedback 1))
+            (setq unlock false)
             (apply-mode)
-            (set 'off true)
+            (setq off true)
         })
     )
 )
@@ -829,9 +835,9 @@
 ; model line is left out on purpose: the UI already knows which one was picked.
 (defun send-defaults ()
     {
-        (set 'use-defaults true)
+        (setq use-defaults true)
         (send-groups)
-        (set 'use-defaults false)
+        (setq use-defaults false)
     }
 )
 
@@ -857,8 +863,8 @@
 
 (defun calib-reset-accum()
     {
-        (set 'calib-off-sum 0.0) (set 'calib-off-cnt 0)
-        (set 'calib-on-sum 0.0) (set 'calib-on-cnt 0)
+        (setq calib-off-sum 0.0) (setq calib-off-cnt 0)
+        (setq calib-on-sum 0.0) (setq calib-on-cnt 0)
     }
 )
 
@@ -866,8 +872,8 @@
 
 (defun calib-add(val)
     (if (calib-slot-light calib-slot)
-        { (set 'calib-on-sum (+ calib-on-sum val)) (set 'calib-on-cnt (+ calib-on-cnt 1)) }
-        { (set 'calib-off-sum (+ calib-off-sum val)) (set 'calib-off-cnt (+ calib-off-cnt 1)) }
+        { (setq calib-on-sum (+ calib-on-sum val)) (setq calib-on-cnt (+ calib-on-cnt 1)) }
+        { (setq calib-off-sum (+ calib-off-sum val)) (setq calib-off-cnt (+ calib-off-cnt 1)) }
     )
 )
 
@@ -915,12 +921,12 @@
 ; forced off during prep so every position starts from the same known state.
 (defun calib-begin-prep(phase)
     {
-        (set 'calib-phase phase)
-        (set 'calib-slot 0)
-        (set 'light false)
+        (setq calib-phase phase)
+        (setq calib-slot 0)
+        (setq light false)
         (calib-reset-accum)
-        (set 'calib-stage 'prep)
-        (set 'calib-since (systime))
+        (setq calib-stage 'prep)
+        (setq calib-since (systime))
         (send-data (str-merge "calib-stage prep " (calib-phase-label phase)))
     }
 )
@@ -928,17 +934,17 @@
 ; Set the light for this slot, then wait out the inrush before sampling.
 (defun calib-begin-settle()
     {
-        (set 'light (calib-slot-light calib-slot))
-        (set 'calib-stage 'settle)
-        (set 'calib-since (systime))
+        (setq light (calib-slot-light calib-slot))
+        (setq calib-stage 'settle)
+        (setq calib-since (systime))
         (send-data (str-merge "calib-stage settle " (calib-phase-label calib-phase) " " (calib-slot-progress)))
     }
 )
 
 (defun calib-begin-sample()
     {
-        (set 'calib-stage 'measure)
-        (set 'calib-since (systime))
+        (setq calib-stage 'measure)
+        (setq calib-since (systime))
         (send-data (str-merge "calib-stage measure " (calib-phase-label calib-phase) " " (calib-slot-progress)))
     }
 )
@@ -947,7 +953,7 @@
 ; the position is done, either move to the full-press position or finish.
 (defun calib-finish-slot()
     {
-        (set 'calib-slot (+ calib-slot 1))
+        (setq calib-slot (+ calib-slot 1))
         (if (< calib-slot calib-slots)
             (calib-begin-settle) ; next light state, same lever position
             {
@@ -959,19 +965,19 @@
                     (str-from-n off-avg "%.3f ") (str-from-n on-avg "%.3f")))
                 (if (= calib-phase 0)
                     { ; released position done - keep it, ask for full press
-                        (set 'calib-off-rel off-avg)
-                        (set 'calib-on-rel on-avg)
+                        (setq calib-off-rel off-avg)
+                        (setq calib-on-rel on-avg)
                         (calib-begin-prep 1)
                     }
                     { ; both positions done - compute and send the result now, then
                       ; hold output disengaged a bit longer so the lever (still held
                       ; fully pressed) can be released before real throttle/brake
                       ; control resumes - avoids a surprise full-power launch
-                        (set 'light false)
+                        (setq light false)
                         (calib-finish-regression (if (eq ch 'thr) "thr" "brk")
                             calib-off-rel off-avg calib-on-rel on-avg)
-                        (set 'calib-stage 'release)
-                        (set 'calib-since (systime))
+                        (setq calib-stage 'release)
+                        (setq calib-since (systime))
                         (send-data (str-merge "calib-stage release " (if (eq ch 'thr) "thr" "brk")))
                     }
                 )
@@ -983,7 +989,7 @@
 (defun calib-start-channel(channel)
     (if (calib-can-start)
         {
-            (set 'calib-channel channel)
+            (setq calib-channel channel)
             (calib-begin-prep 0) ; start at the released position
         }
         (send-data "calib-refused")
@@ -998,14 +1004,14 @@
 )
 
 (defun reset-legal-ramp ()
-    { (set 'ramp-level 0.0) (set 'ramp-ready false) (set 'ramp-rest-since nil) }
+    { (setq ramp-level 0.0) (setq ramp-ready false) (setq ramp-rest-since nil) }
 )
 
 (defunret legal-throttle (throttle brake)
     {
         (var dt (secs-since ramp-tick))
-        (set 'ramp-tick (systime))
-        (if (> dt 0.5) { (set 'ramp-level 0.0) (set 'ramp-rest-since nil) })
+        (setq ramp-tick (systime))
+        (if (> dt 0.5) { (setq ramp-level 0.0) (setq ramp-rest-since nil) })
         (var start (conf-get 'adc-v1-start))
         (var end (conf-get 'adc-v1-end))
         (var low (conf-get 'adc-v1-min))
@@ -1018,24 +1024,24 @@
         ; A low voltage must actually decode as a released throttle before arming.
         (if (not ramp-ready) {
             (if (or (> throttle (+ start (* adc-touch (- end start)))) off lock (not (eq calib-stage 'idle)))
-                (set 'ramp-rest-since nil)
+                (setq ramp-rest-since nil)
                 (if (eq ramp-rest-since nil)
-                    (set 'ramp-rest-since (systime))
+                    (setq ramp-rest-since (systime))
                     (if (and (> (secs-since ramp-rest-since) 0.2)
                              (<= (get-adc-decoded 0) adc-touch))
-                        (set 'ramp-ready true))))
+                        (setq ramp-ready true))))
             (return throttle)
         })
-        (if (<= throttle start) { (set 'ramp-level 0.0) (return throttle) })
+        (if (<= throttle start) { (setq ramp-level 0.0) (return throttle) })
         (if (or off lock (not (eq calib-stage 'idle)) (not (start-speed-reached cur-speed-kmh))
                 (> (get-adc-decoded 1) adc-touch)
                 (and software-adc2 brake-start-known (> brake (conf-get 'adc-v2-start))))
-            { (set 'ramp-level 0.0) (return start) })
+            { (setq ramp-level 0.0) (return start) })
 
         (var target (/ (- throttle start) (- end start)))
         (if (> target 1.0) (setq target 1.0))
         (var ceiling (+ ramp-level (/ (if (> dt 0.1) 0.1 dt) legal-ramp-seconds)))
-        (set 'ramp-level (if (< target ceiling) target ceiling))
+        (setq ramp-level (if (< target ceiling) target ceiling))
         (if (>= ramp-level target) throttle (+ start (* (- end start) ramp-level)))
     }
 )
@@ -1053,15 +1059,15 @@
         (let ((gap (secs-since last-rx)))
             (if (< gap 1.0)
                 (if (> gap rx-gap-avg)
-                    (set 'rx-gap-avg gap)
-                    (set 'rx-gap-avg (+ (* 0.98 rx-gap-avg) (* 0.02 gap)))
+                    (setq rx-gap-avg gap)
+                    (setq rx-gap-avg (+ (* 0.98 rx-gap-avg) (* 0.02 gap)))
                 )
             )
         )
-        (set 'last-rx (systime)) ; feed the dash link watchdog
+        (setq last-rx (systime)) ; feed the dash link watchdog
 
-        (set 'dash-thr-raw (bufget-u8 uart-buf (+ thr-idx off))) ; raw physical throttle (before override)
-        (set 'dash-brk-raw (bufget-u8 uart-buf (+ brk-idx off))) ; raw physical brake (before override)
+        (setq dash-thr-raw (bufget-u8 uart-buf (+ thr-idx off))) ; raw physical throttle (before override)
+        (setq dash-brk-raw (bufget-u8 uart-buf (+ brk-idx off))) ; raw physical brake (before override)
         (var thr-raw-v (/ dash-thr-raw 77.2)) ; 255/3.3 = 77.2
         (var brk-raw-v (/ dash-brk-raw 77.2))
 
@@ -1072,9 +1078,9 @@
         ; a dash that is not powered up yet reports both levers at 0x0a, far
         ; under any real rest position - taking that as the rest would leave the
         ; levers looking active for good and starve the app of its bulk reads
-        (if (and (> dash-thr-raw 16) (< dash-thr-raw thr-rest)) (set 'thr-rest dash-thr-raw))
-        (if (and (> dash-brk-raw 16) (< dash-brk-raw brk-rest)) (set 'brk-rest dash-brk-raw))
-        (set 'levers-active (or (> dash-thr-raw (+ thr-rest 10))
+        (if (and (> dash-thr-raw 16) (< dash-thr-raw thr-rest)) (setq thr-rest dash-thr-raw))
+        (if (and (> dash-brk-raw 16) (< dash-brk-raw brk-rest)) (setq brk-rest dash-brk-raw))
+        (setq levers-active (or (> dash-thr-raw (+ thr-rest 10))
                                 (> dash-brk-raw (+ brk-rest 10))))
 
         (if (< throttle 0.0) (setq throttle 0.0))
@@ -1082,12 +1088,12 @@
         (if (< brake 0.0) (setq brake 0.0))
         (if (> brake 3.3) (setq brake 3.3))
 
-        (set 'thr-corr-v throttle) ; pre-mask - cruise release detection needs it
+        (setq thr-corr-v throttle) ; pre-mask - cruise release detection needs it
 
         (if (and software-adc (not unlock) (> legal-ramp-seconds 0.0) (not cruising))
             (setq throttle (legal-throttle throttle brake))
             (if (or (> ramp-level 0.0) ramp-rest-since)
-                { (set 'ramp-level 0.0) (set 'ramp-rest-since nil) }))
+                { (setq ramp-level 0.0) (setq ramp-rest-since nil) }))
 
         ; cruise capture-assist: hold the throttle signal at 0 from activation
         ; until the lever is physically released, so the app captures the speed
@@ -1119,7 +1125,7 @@
         ; sent, so we just let the grace window run out unconditionally.
         (if (and (not (eq calib-stage 'idle)) (not (eq calib-stage 'release)) (not (calib-can-start)))
             {
-                (set 'calib-stage 'idle)
+                (setq calib-stage 'idle)
                 (send-data "calib-aborted")
             }
             (cond
@@ -1138,7 +1144,7 @@
                 ((eq calib-stage 'release)
                     (if (> (secs-since calib-since) calib-release-duration)
                         {
-                            (set 'calib-stage 'idle)
+                            (setq calib-stage 'idle)
                             (send-data (str-merge "calib-stage idle " (if (eq calib-channel 'thr) "thr" "brk")))
                         }
                     )
@@ -1159,8 +1165,8 @@
                     ((= brake-light-mode 1) 1.0)
                     ((= brake-light-mode 2) {
                         (if (> (secs-since blink-since) 0.15) {
-                            (set 'blink-state (not blink-state))
-                            (set 'blink-since (systime))
+                            (setq blink-state (not blink-state))
+                            (setq blink-since (systime))
                         })
                         (if blink-state 1.0 0.0)
                     })
@@ -1174,10 +1180,10 @@
 
 (defun cruise-cancel()
     (if cruising {
-        (set 'cruising false)
-        (set 'cruise-blocked true) ; no re-arming until the throttle is released
+        (setq cruising false)
+        (setq cruise-blocked true) ; no re-arming until the throttle is released
         (app-adc-override 3 0) ; release the ADC app's cruise button
-        (if cruise-stop-beep (set 'feedback 1))
+        (if cruise-stop-beep (setq feedback 1))
     })
 )
 
@@ -1204,7 +1210,7 @@
                     (if (if software-adc
                             (< thr-corr-v cruise-v1-start)
                             (<= thr adc-touch))
-                        (set 'cruise-thr-released true)
+                        (setq cruise-thr-released true)
                     )
                     ; After release, any lever touch past the ADC mapping start
                     ; voltage cancels. The live lever is already flowing to the
@@ -1217,9 +1223,9 @@
                 }
                 (if (<= thr adc-touch)
                     { ; throttle released - re-arm and hold the timer at now
-                        (set 'cruise-blocked false)
-                        (set 'cruise-ref speed-kmh)
-                        (set 'cruise-since (systime))
+                        (setq cruise-blocked false)
+                        (setq cruise-ref speed-kmh)
+                        (setq cruise-since (systime))
                     }
                     ; also never below the kick-start speed - output is disabled
                     ; down there, so cruise would arm against a dead motor
@@ -1227,22 +1233,22 @@
                              (>= speed-kmh cruise-min-speed) (<= speed-kmh cruise-max-speed))
                         {
                             (if (> (abs (- speed-kmh cruise-ref)) cruise-deviation) {
-                                (set 'cruise-ref speed-kmh)
-                                (set 'cruise-since (systime))
+                                (setq cruise-ref speed-kmh)
+                                (setq cruise-since (systime))
                             })
                             (if (> (secs-since cruise-since) cruise-delay) {
-                                (set 'cruising true)
-                                (set 'cruise-thr-released false)
-                                (set 'cruise-v1-start (conf-get 'adc-v1-start)) ; fresh from the app config
-                                (set 'cruise-shown-time (systime))
+                                (setq cruising true)
+                                (setq cruise-thr-released false)
+                                (setq cruise-v1-start (conf-get 'adc-v1-start)) ; fresh from the app config
+                                (setq cruise-shown-time (systime))
                                 (app-adc-override 3 1) ; hold the cruise button
-                                (if cruise-start-beep (set 'feedback 2))
-                                (set 'cruise-since (systime))
+                                (if cruise-start-beep (setq feedback 2))
+                                (setq cruise-since (systime))
                             })
                         }
                         { ; blocked or too slow - keep the timer from counting
-                            (set 'cruise-ref speed-kmh)
-                            (set 'cruise-since (systime))
+                            (setq cruise-ref speed-kmh)
+                            (setq cruise-since (systime))
                         }
                     )
                 )
@@ -1254,7 +1260,7 @@
 
 (defun handle-features()
     {
-        (set 'cur-speed-kmh (* (get-lowest-speed) 3.6))
+        (setq cur-speed-kmh (* (get-lowest-speed) 3.6))
         (check-slip)
 
         ; battery %: BMS reads can throw if no BMS is present - keep them from
@@ -1262,19 +1268,19 @@
         (trap
             (if (and bms-soc-enable (> (get-bms-val 'bms-soc) 0))
                 {
-                    (set 'bms-active true)
-                    (set 'cur-batt (* (get-bms-val 'bms-soc) 100))
+                    (setq bms-active true)
+                    (setq cur-batt (* (get-bms-val 'bms-soc) 100))
                     (var bt (get-bms-val 'bms-temp-cell-max))
-                    (set 'cur-bms-temp bt)
-                    (set 'bms-warn (or (> bt bms-temp-hi) (< bt bms-temp-lo)))
+                    (setq cur-bms-temp bt)
+                    (setq bms-warn (or (> bt bms-temp-hi) (< bt bms-temp-lo)))
                 }
                 {
-                    (set 'cur-batt (* (get-batt) 100))
+                    (setq cur-batt (* (get-batt) 100))
                     ; nothing resets these on its own, and both the pack tile and
                     ; the dash warning read them
-                    (set 'bms-active false)
-                    (set 'bms-warn false)
-                    (set 'cur-bms-temp -100.0)
+                    (setq bms-active false)
+                    (setq bms-warn false)
+                    (setq cur-bms-temp -100.0)
                 }
             )
         )
@@ -1331,7 +1337,7 @@
             (if (= power-pin 1) (app-adc-override 0 0))
             (if (= power-pin 2) (app-adc-override 1 0))
         })
-        (if (not drive-hold) (handle-lock (abs current-speed)))
+        (if (not (eq drive-hold 'blocked)) (handle-lock (abs current-speed)))
             }
 )
 
@@ -1371,62 +1377,32 @@
         ; stock controller was captured sending 0x12, off and eco together, and
         ; TriWrite's ESP32 sums them the same way. The older path sent a bare 16
         ; or 32 and threw the speed mode away with them.
-        (if (= model 3)
-            (bufset-u8 tx-frame tx-base (+ mode-base
-                                           (if off 16 0)
-                                           (if lock 32 0)
-                                           (if (or warn-temp bms-warn) 128 0)))
-            (if off
-                (bufset-u8 tx-frame tx-base 16)
-                (if lock
-                    (bufset-u8 tx-frame tx-base 32) ; lock display
-                    (if (or warn-temp bms-warn) ; temp icon will show up above warning degree
-                        (bufset-u8 tx-frame tx-base (+ 128 mode-base))
-                        (bufset-u8 tx-frame tx-base mode-base)
-                    )
-                )
-            )
-        )
-
-        ; batt field
-        (if lock
-            (bufset-u8 tx-frame (+ tx-base 1) 0) ; lock display
-            (bufset-u8 tx-frame (+ tx-base 1) battery)
-        )
+        (var warning (if (or warn-temp bms-warn) 128 0))
+        (bufset-u8 tx-frame tx-base
+            (cond ((= model 3) (+ mode-base warning (if off 16 0) (if lock 32 0)))
+                  (off 16) (lock 32) (t (+ mode-base warning))))
+        (bufset-u8 tx-frame (+ tx-base 1) (if lock 0 battery))
 
         ; light field - bit 0 on a Ninebot, and the G2 packs cruise in beside it.
         ; The M365 wants bit 6: a stock controller sends 0x64 and Koxx3's M365
         ; firmware 0x40, and bit 6 is what those two have in common. Bit 0 is
         ; clear in both, so the 1 this used to send was never the lamp.
         (var lamp (if (= model 1) 100 1))
-        (if (not off)
-            (if (> alarm 4)
-                (bufset-u8 tx-frame (+ tx-base 2) lamp) ; alarm on
-                (bufset-u8 tx-frame (+ tx-base 2) (+ (if (and light (or (not-eq calib-stage 'idle) (not (and lock head-off-lock)))) lamp 0)
-                                                     (if (and (= model 3) cruising) 4 0)))
-            )
-            (bufset-u8 tx-frame (+ tx-base 2) 0)
-        )
+        (bufset-u8 tx-frame (+ tx-base 2)
+            (cond (off 0) ((> alarm 4) lamp)
+                  (t (+ (if (and light (or (not-eq calib-stage 'idle) (not (and lock head-off-lock)))) lamp 0)
+                        (if (and (= model 3) cruising) 4 0)))))
 
-        ; speed field
-        (if lock
-            (bufset-u8 tx-frame (+ tx-base 4) 0) ; lock display
-            (if (and cruising (< (secs-since cruise-shown-time) 3))
-                (bufset-u8 tx-frame (+ tx-base 4) 125) ; "C5" for 3s after cruise engages
-                (if (if unlock show-batt-idle-secret show-batt-in-idle)
-                    (if (> current-speed 1)
-                        (bufset-u8 tx-frame (+ tx-base 4) disp-speed)
-                        (bufset-u8 tx-frame (+ tx-base 4) (idle-value)))
-                    (bufset-u8 tx-frame (+ tx-base 4) disp-speed)
-                )
-            )
-        )
-
-        ; error field
-        (if (> alarm 0)
-            (bufset-u8 tx-frame (+ tx-base 5) 99) ; alarm active
-            (bufset-u8 tx-frame (+ tx-base 5) (get-fault))
-        )
+        (var error-code (if (> alarm 0) 99 (get-fault)))
+        (bufset-u8 tx-frame (+ tx-base 4)
+            (cond (lock 0)
+                  ((and cruising (< (secs-since cruise-shown-time) 3)) 125)
+                  ((and (<= current-speed 1) (if unlock show-batt-idle-secret show-batt-in-idle)) (idle-value))
+                  (t disp-speed)))
+        ; The stock G30 renders the fault byte in red. Actual alarms and faults take priority.
+        (bufset-u8 tx-frame (+ tx-base 5)
+            (if (and (= model 0) (not off) (= error-code 0)
+                     (< (secs-since drive-notice-time) 1.0)) drive-notice error-code))
 
     }
 )
@@ -1445,8 +1421,8 @@
         (if (> feedback 0)
             {
                 (bufset-u8 tx-frame (+ tx-base 3) 1)
-                (set 'feedback (- feedback 1))
-                (set 'beep-time (systime))
+                (setq feedback (- feedback 1))
+                (setq beep-time (systime))
             }
             (bufset-u8 tx-frame (+ tx-base 3) 0)
         )
@@ -1455,8 +1431,7 @@
         (looprange i tx-base crc-end
             (setq crcout (+ crcout (bufget-u8 tx-frame i))))
         (setq crcout (bitwise-xor crcout 0xFFFF))
-        (bufset-u8 tx-frame crc-end crcout)
-        (bufset-u8 tx-frame (+ crc-end 1) (shr crcout 8))
+        (bufset-u16 tx-frame crc-end crcout 'little-endian)
     }
 )
 
@@ -1520,28 +1495,27 @@
     {
         ; Five times a second: only what genuinely moves that fast.
         (if (> (secs-since app-cache-time) 0.2) {
-            (set 'app-cache-time (systime))
-            (set 'cur-vin (get-vin))
-            (set 'cur-amps (setup-current-in))
-            (set 'cur-fet (get-temp-fet))
-            (set 'cur-mot (get-temp-mot))
+            (setq app-cache-time (systime))
+            (setq cur-vin (get-vin))
+            (setq cur-amps (setup-current-in))
+            (setq cur-fet (get-temp-fet))
+            (setq cur-mot (get-temp-mot))
             ; the hottest of every unit, sampled here so the dash frame and the
             ; state line can read a number instead of walking the bus themselves
-            (set 'cur-fet-max (highest-temp cur-fet canget-temp-fet))
-            (set 'cur-mot-max (highest-temp cur-mot canget-temp-motor))
-            (set 'warn-temp (or (> cur-fet-max temp-warning-fet)
+            (setq cur-fet-max (highest-temp cur-fet canget-temp-fet))
+            (setq cur-mot-max (highest-temp cur-mot canget-temp-motor))
+            (setq warn-temp (or (> cur-fet-max temp-warning-fet)
                                 (> cur-mot-max temp-warning-motor)))
-            (set 'cur-cell-mv (app-clamp16 (/ (* cur-vin 1000) cur-cells)))
+            (setq cur-cell-mv (app-clamp16 (/ (* cur-vin 1000) cur-cells)))
             ; Real per-cell voltages and health when a VESC BMS is reporting, so
             ; an app's cell view shows the actual balance instead of fifteen
             ; copies of the pack average. Sampled here, never in the reply path.
             (if bms-active
                 (trap {
-                    (set 'cur-soh (app-clamp16 (* (get-bms-val 'bms-soh) 100)))
+                    (setq cur-soh (app-clamp16 (* (get-bms-val 'bms-soh) 100)))
                     (looprange i 0 (if (> cur-cells 15) 15 cur-cells) {
                         (var mv (app-clamp16 (* (get-bms-val 'bms-v-cell i) 1000)))
-                        (bufset-u8 app-cells (* i 2) (bitwise-and mv 0xFF))
-                        (bufset-u8 app-cells (+ (* i 2) 1) (bitwise-and (shr mv 8) 0xFF))
+                        (bufset-u16 app-cells (* i 2) mv 'little-endian)
                     })
                 })
             )
@@ -1563,17 +1537,17 @@
         ; conf-get and sysinfo are expensive. They run one group per tick rather
         ; than all together, so no single pass can hold the evaluator for long.
         (if (> (secs-since app-slow-time) 0.5) {
-            (set 'app-slow-time (systime))
+            (setq app-slow-time (systime))
             (cond
                 ((= app-slow-step 0) {
-                    (set 'cur-wh-tot (* 0.85 (conf-get 'si-battery-ah) (* 3.7 (conf-get 'si-battery-cells))))
-                    (set 'cur-range (send-state-range))
-                    (set 'cur-trip (to-i (- (get-dist-abs) base-dist)))
+                    (setq cur-wh-tot (* 0.85 (conf-get 'si-battery-ah) (* 3.7 (conf-get 'si-battery-cells))))
+                    (setq cur-range (send-state-range))
+                    (setq cur-trip (to-i (- (get-dist-abs) base-dist)))
                 })
                 ((= app-slow-step 1) {
-                    (set 'cur-odo (app-sysinfo 'odometer))
-                    (set 'cur-runtime (app-sysinfo 'runtime))
-                    (set 'cur-maxkmh (send-state-maxkmh))
+                    (setq cur-odo (app-sysinfo 'odometer))
+                    (setq cur-runtime (app-sysinfo 'runtime))
+                    (setq cur-maxkmh (send-state-maxkmh))
                 })
                 ((= app-slow-step 2)
                     (if (!= model 1) {
@@ -1583,11 +1557,11 @@
                     })
                 )
                 (t (if (and b0-wanted (!= model 1)) {
-                    (set 'b0-wanted false)
+                    (setq b0-wanted false)
                     (build-app-frame app-f-b0 0xb0 52)
                 }))
             )
-            (set 'app-slow-step (mod (+ app-slow-step 1) 4))
+            (setq app-slow-step (mod (+ app-slow-step 1) 4))
         })
     }
 )
@@ -1633,13 +1607,13 @@
     ; app asks ten, so a live build costs less than keeping buffers current
     (let ((ab (if (or (= model 1) app-pend2) nil (app-pend-buf))))
         {
-            (set 'app-pend false)
+            (setq app-pend false)
             (seal-dash-frame)
             (if app-pend2
                 ; both slots full - build the pair onto the end of the dash frame
                 ; and send the lot as one transmission
                 {
-                    (set 'app-pend2 false)
+                    (setq app-pend2 false)
                     (var dl (buflen tx-frame))
                     (var l1 (app-fr-len pend-n))
                     (var cb (array-create (+ dl l1 (app-fr-len pend2-n))))
@@ -1716,13 +1690,11 @@
                        (if xm (xm-word (+ reg i)) (nb-word (+ reg i)))))
             (var lo (bitwise-and w 0xFF))
             (var hi (bitwise-and (shr w 8) 0xFF))
-            (bufset-u8 buf (+ p (* i 2)) lo)
-            (bufset-u8 buf (+ p (* i 2) 1) hi)
+            (bufset-u16 buf (+ p (* i 2)) w 'little-endian)
             (setq crc (+ crc lo hi))
         })
         (setq crc (bitwise-xor crc 0xFFFF))
-        (bufset-u8 buf (+ p n) (bitwise-and crc 0xFF))
-        (bufset-u8 buf (+ p n 1) (bitwise-and (shr crc 8) 0xFF))
+        (bufset-u16 buf (+ p n) crc 'little-endian)
     }
 )
 
@@ -1745,7 +1717,7 @@
 (defun app-refresh-7b () (if (!= model 1) (build-app-frame app-f-7b 0x7b 6)))
 
 ; the app's writes all land as a bit for the feature loop to pick up
-(defun app-todo+ (bit) (set 'app-todo (bitwise-or app-todo bit)))
+(defun app-todo+ (bit) (setq app-todo (bitwise-or app-todo bit)))
 
 (defun app-write (reg val)
     (cond
@@ -1756,7 +1728,7 @@
             (app-todo+ 32)))
         ((= reg 0x75) (let ((m (cond ((= val 1) 2) ((= val 2) 4) (t 1))))
             (if (!= m speedmode) {
-                (set 'speedmode m)
+                (setq speedmode m)
                 (app-todo+ 16)
             })))
         ; 0x7A is Reserved in the Ninebot protocol, so it is free for a proper
@@ -1764,18 +1736,18 @@
         ; session on this hardware whatever triggers it - see docs/ninedash.md
         ((= reg 0x7a) (let ((v (!= val 0)))
             (if (not (eq v light)) {
-                (set 'light v)
+                (setq light v)
                 (app-refresh-7b)
             })))
         ((= reg 0x7c) (let ((v (and (!= val 0) cruise-allow)))
             (if (not (eq v cruise-enabled)) {
-                (set 'cruise-enabled v)
+                (setq cruise-enabled v)
                 (app-refresh-7b)
                 (app-todo+ 1)
             })))
         ((= reg 0x7d) (let ((v (!= val 0)))
             (if (not (eq v auto-taillight)) {
-                (set 'auto-taillight v)
+                (setq auto-taillight v)
                 (app-refresh-7b)
                 (app-todo+ 2)
             })))
@@ -1784,7 +1756,7 @@
         ; headlight instead.
         ((= reg 0x7b) (let ((m (cond ((= val 1) 1) ((= val 2) 4) (t 2)))) ; weak eco, medium drive, strong sport
             (if (!= m speedmode) {
-                (set 'speedmode m)
+                (setq speedmode m)
                 (app-todo+ 16)
             })))
         ((= reg 0x77) (let ((u (!= val 0)))
@@ -1794,22 +1766,22 @@
             })))
         ((= reg 0x76) (let ((v (!= val 0)))
             (if (not (eq v light)) {
-                (set 'light v)
+                (setq light v)
                 (app-refresh-7b)
             })))
-        ((= reg 0x90) (set 'light (!= val 0)))
+        ((= reg 0x90) (setq light (!= val 0)))
         ; 0x79 powerdown: the dashboard is powered separately from a VESC, so
         ; this turns it off the same way the appUI button and a long press do,
         ; rather than cutting the whole vehicle
         ((= reg 0x79) (if (!= val 0) (app-todo+ 64)))
-        ((= reg 0x7e) (if (and find-beep (!= val 0)) (set 'feedback 3))) ; find my scooter
+        ((= reg 0x7e) (if (and find-beep (!= val 0)) (setq feedback 3))) ; find my scooter
         ((or (= reg 0x91) (= reg 0x92)) (let ((v (!= val 0)))
             (if (not (eq v alarm-tone)) {
-                (set 'alarm-tone v)
+                (setq alarm-tone v)
                 (app-todo+ 4)
             })))
         ((= reg 0x17) (if (and (>= val 0) (<= val 999999) (!= val app-pin)) {
-            (set 'app-pin val)
+            (setq app-pin val)
             (app-build-pin)
             (app-todo+ 8)
         }))
@@ -1820,7 +1792,7 @@
     (if (!= app-todo 0)
         (let ((td app-todo))
             {
-                (set 'app-todo 0)
+                (setq app-todo 0)
                 (if (= (bitwise-and td 64) 64) (ctrl-power false)) ; speed guarded there
                 (if (= (bitwise-and td 32) 32) (toggle-lock))
                 (if (= (bitwise-and td 16) 16) (apply-mode))
@@ -1926,8 +1898,7 @@
             (bufset-u8 buf 6 reg)
             (bufset-u8 buf 7 1)
             (setq crc (bitwise-xor crc 0xFFFF))
-            (bufset-u8 buf 8 (bitwise-and crc 0xFF))
-            (bufset-u8 buf 9 (bitwise-and (shr crc 8) 0xFF))
+            (bufset-u16 buf 8 crc 'little-endian)
             (uart-write buf)
             })
             (free buf)
@@ -1948,12 +1919,12 @@
         (setq n (bitwise-and n 0xFE))
         (if (not (and (>= n 20) levers-active))
             (if (not app-pend) {
-                (set 'pend-dev dev) (set 'pend-reg reg) (set 'pend-n n)
-                (set 'app-pend true)
+                (setq pend-dev dev) (setq pend-reg reg) (setq pend-n n)
+                (setq app-pend true)
             }
             (if (not app-pend2) {
-                (set 'pend2-dev dev) (set 'pend2-reg reg) (set 'pend2-n n)
-                (set 'app-pend2 true)
+                (setq pend2-dev dev) (setq pend2-reg reg) (setq pend2-n n)
+                (setq app-pend2 true)
             }))
         )
     }
@@ -2016,8 +1987,8 @@
                 (let ((want (if (> n 0) (bufget-u8 uart-buf p) 2)))
                     {
                         (if (not xm) {
-                            (if (!= src app-dst) (set 'app-dst src))
-                            (if (and (= reg 0xb0) (= want 52)) (set 'b0-wanted true))
+                            (if (!= src app-dst) (setq app-dst src))
+                            (if (and (= reg 0xb0) (= want 52)) (setq b0-wanted true))
                         })
                         (app-hold dev reg want)
                     }
@@ -2048,13 +2019,13 @@
     (if (>= len 4)
         (let ((a (bufget-u8 uart-buf 7)))
             {
-                (if (= a 0x60) (if horn-beep (set 'feedback 1))) ; refreshed while held
+                (if (= a 0x60) (if horn-beep (setq feedback 1))) ; refreshed while held
                 (if (and (= a 0x50) (!= g2-aux 0x50) cruise-allow (not off) (not lock)) {
-                    (set 'cruise-enabled (not cruise-enabled))
-                    (if cruise-toggle-beep (set 'feedback 2))
+                    (setq cruise-enabled (not cruise-enabled))
+                    (if cruise-toggle-beep (setq feedback 2))
                     (app-todo+ 1) ; the flash write waits for the feature loop
                 })
-                (set 'g2-aux a)
+                (setq g2-aux a)
             }
         )
     )
@@ -2126,7 +2097,7 @@
                                     (if (= model 3) (g2-extras len))
                                     (if (and (= cmd 0x64)
                                              (> (secs-since dash-tx-time) dash-tx-iv)) {
-                                        (set 'dash-tx-time (systime))
+                                        (setq dash-tx-time (systime))
                                         (if app-pend (send-dash-and-app) (update-dash))
                                     })
                                 })
@@ -2212,10 +2183,10 @@
 
 (defun toggle-lock()
     {
-        (set 'lock (not lock)) ; lock on or off
-        (if (and lock secret-exit-on-lock) (set 'unlock false)) ; optionally leave secret mode when locking
+        (setq lock (not lock)) ; lock on or off
+        (if (and lock secret-exit-on-lock) (setq unlock false)) ; optionally leave secret mode when locking
         (apply-mode)
-        (if (if lock lock-beep unlock-beep) (set 'feedback 1)) ; beep feedback
+        (if (if lock lock-beep unlock-beep) (setq feedback 1)) ; beep feedback
         (if (not lock)
             (stop-alarm)
         )
@@ -2225,16 +2196,16 @@
 (defun cycle-mode()
     {
         (cond
-            ((= speedmode 1) (set 'speedmode 4))
-            ((= speedmode 2) (set 'speedmode 1))
-            ((= speedmode 4) (set 'speedmode 2))
+            ((= speedmode 1) (setq speedmode 4))
+            ((= speedmode 2) (setq speedmode 1))
+            ((= speedmode 4) (setq speedmode 2))
         )
         (apply-mode)
     }
 )
 
 (defun toggle-light()
-    (set 'light (not light))
+    (setq light (not light))
 )
 
 ; Gestures stop above the speed set in Setup - 0.1 km/h by default, so standstill
@@ -2247,11 +2218,13 @@
 
 (defun lock-if-stopped () (if (at-standstill) (toggle-lock)))
 
+(defun drive-stopped ()
+    (and (not off) (= alarm 0) (not cruising) (eq calib-stage 'idle)
+         (at-standstill) (<= (abs (get-rpm)) 2) (= (get-fault) 0) (app-adc-range-ok)))
+
 (defun drive-idle ()
-    (and (not off) (not lock) (not cruising) (eq calib-stage 'idle)
-         (at-standstill) (<= (abs (get-rpm)) 2) (<= (abs (get-current)) 0.5)
-         (<= (abs (get-duty)) 0.01) (= (get-fault) 0)
-         (app-adc-range-ok) (= (gesture-levers true) 0)
+    (and (drive-stopped) (<= (abs (get-current)) 0.5) (<= (abs (get-duty)) 0.01)
+         (= (gesture-levers true) 0)
          (or (not software-adc) (<= thr-corr-v (conf-get 'adc-v1-start)))
          (= (get-adc-decoded 0) 0) (= (get-adc-decoded 1) 0)))
 
@@ -2268,8 +2241,8 @@
 (defun guard-drive () { (setq drive-hold 'blocked) (app-disable-output -1) (set-current-rel 0) })
 (defun drive-mark (value)
     (and (eeprom-store-i 119 value) (= (or (eeprom-read-i 119) -1) value)))
-(defun finish-drive ()
-    (if (drive-mark 0) { (setq drive-tick (systime)) (setq drive-hold 'neutral) }))
+(defun wait-drive (state) { (setq drive-tick (systime)) (setq drive-hold state) })
+(defun finish-drive () (if (drive-mark 0) (wait-drive 'neutral)))
 
 (defun resume-drive ()
     (let ((mark (eeprom-read-i 119)))
@@ -2282,7 +2255,8 @@
         })))
 
 (defun switch-drive ()
-    (if (and bldc-shortcut (not drive-hold) (not (can-list-devs)) (drive-idle))
+    (if (and bldc-shortcut (eq lock drive-locked) (or (not drive-hold) (eq drive-hold 'release))
+             (not (can-list-devs)) (drive-idle))
         (let ((mode (conf-get 'motor-type)) (dir (conf-get 'm-invert-direction)))
             (if (and (member mode '(0 2)) (member dir '(0 1))) {
                 (guard-drive)
@@ -2293,15 +2267,38 @@
                     (finish-drive))
                 (send-data (cond ((eq drive-hold 'blocked) "drive Check motor settings; output disabled")
                                  ((not changed) "drive Switch cancelled")
-                                 ((= mode 2) "drive BLDC")
-                                 (t "drive FOC")))
+                                 (t {
+                                     (setq drive-notice-time (systime))
+                                     (setq drive-notice (if (= mode 2) 81 82))
+                                     (if (= mode 2) "drive BLDC" "drive FOC")
+                                 })))
             }))))
 
-(defun update-drive-hold ()
-    (if (eq drive-hold 'neutral)
-        (if (drive-idle)
-            (if (> (secs-since drive-tick) 0.5) (setq drive-hold nil))
-            (setq drive-tick (systime)))))
+(defun request-drive ()
+    (if (and (not drive-hold) (drive-stopped) (not (can-list-devs)))
+        (if (= drive-combo 3) (switch-drive)
+            { (guard-drive) (wait-drive 'release) })))
+
+(defun update-drive-hold () {
+    (if (and (> drive-notice 0) (>= (secs-since drive-notice-time) 1.0))
+        (setq drive-notice 0))
+    (cond
+        ((eq drive-hold 'release)
+            (if (or (not bldc-shortcut) (not (eq lock drive-locked)) (not (drive-stopped))
+                    (< (gesture-levers true) 0) (> (secs-since drive-tick) 2))
+                (wait-drive 'neutral)
+                (switch-drive)))
+        ((eq drive-hold 'neutral)
+            (if (drive-idle)
+                (if (>= (secs-since drive-tick) 1.0) (setq drive-hold nil))
+                (setq drive-tick (systime)))))
+})
+
+(defun drive-gesture (n)
+    (if (and bldc-shortcut (= n drive-presses) (<= n 5) (eq lock drive-locked)
+             (or (> n 0) (and (!= drive-combo 3) (= presses 0) (not last-button-state)))
+             (<= 0 drive-combo) (<= drive-combo 3)
+             (= (gesture-levers true) (ix '(3 1 2 0) drive-combo))) request-drive))
 
 (defun gesture-action (n mask)
     (if (>= mask 0)
@@ -2317,14 +2314,14 @@
                       (eq mode-requires-lock lock)) cycle-mode)
                 ((and (= n light-presses) (= combo light-combo)
                       (eq light-requires-lock lock)) toggle-light)
-                ((and bldc-shortcut (= n 4) (= mask 0)) switch-drive)))))
+                (t (drive-gesture n))))))
 
 (defun handle-button ()
     (if (and off (= presses 1))
         {
-            (set 'off false) ; turn on
-            (if power-on-beep (set 'feedback 1)) ; beep feedback
-            (set 'unlock false) ; Disable unlock on turn off
+            (setq off false) ; turn on
+            (if power-on-beep (setq feedback 1)) ; beep feedback
+            (setq unlock false) ; Disable unlock on turn off
             (boot-state)
             (apply-mode) ; Apply mode on start-up
             (stats-reset) ; reset stats when turning on
@@ -2335,17 +2332,18 @@
 ; Zero-press gestures still require the original half-second hold and a release to re-arm.
 (defun handle-lever-gestures()
     {
-        (var state (gesture-levers false))
+        (var mask (gesture-levers false))
+        (var state (if (and bldc-shortcut (= drive-presses 0)) (gesture-levers true) mask))
         (if (!= state lever-state) {
             (setq lever-state state)
             (setq lever-since (systime))
             (setq entry-hold-ok true)
         })
         (if (not (entry-speed-ok)) (setq entry-hold-ok false))
-        (if (= state 0) (set 'lever-armed true))
+        (if (= state 0) (setq lever-armed true))
 
         (if (and lever-armed (> state 0) (> (secs-since lever-since) 0.5))
-            (let ((action (gesture-action 0 state)))
+            (let ((action (if (= mask 0) (drive-gesture 0) (gesture-action 0 mask))))
                 (if action { (setq lever-armed false) (action) }))
         )
     }
@@ -2355,11 +2353,11 @@
     {
         (if (and (not lock) (not off)) ; it is locked and off?
             {
-                (set 'light false) ; turn off light
-                (if power-off-beep (set 'feedback 1)) ; beep feedback
-                (set 'unlock false) ; Disable unlock on turn off
+                (setq light false) ; turn off light
+                (if power-off-beep (setq feedback 1)) ; beep feedback
+                (setq unlock false) ; Disable unlock on turn off
                 (apply-mode)
-                (set 'off true) ; turn off
+                (setq off true) ; turn off
             }
         )
     }
@@ -2367,8 +2365,8 @@
 
 (defun reset-button()
     {
-        (set 'press-time (systime)) ; reset press time again
-        (set 'presses 0)
+        (setq press-time (systime)) ; reset press time again
+        (setq presses 0)
     }
 )
 
@@ -2591,7 +2589,7 @@
         (trap ; a CAN device dropping off the bus must not break speed reads
             (loopforeach i (can-devs)
                 (let ((can-speed (canget-speed i)))
-                    (if (< can-speed speed) (set 'speed can-speed))
+                    (if (< can-speed speed) (setq speed can-speed))
                 )
             )
         )
@@ -2613,14 +2611,14 @@
         (var g (if (< gyro-src 0) (get-imu-gyro) (rcode-run gyro-src 0.5 '(get-imu-gyro))))
         (if (gyro-live g) (return g))
         (if (< (secs-since gyro-probe) 10.0) (return '(0.0 0.0 0.0)))
-        (set 'gyro-probe (systime))
-        (set 'gyro-src -1)
+        (setq gyro-probe (systime))
+        (setq gyro-src -1)
         (setq g (get-imu-gyro))
         (if (gyro-live g) (return g))
         (loopforeach i (can-devs)
             (let ((c (rcode-run i 0.5 '(get-imu-gyro))))
                 (if (gyro-live c) {
-                    (set 'gyro-src i)
+                    (setq gyro-src i)
                     (return c)
                 })
             )
@@ -2667,8 +2665,8 @@
                     ; read once for the whole pass - gestures, cruise, the slip
                     ; check and the brake light all used to ask separately, and a
                     ; lever released halfway through was seen both ways at once
-                    (set 'lev-thr (get-adc-decoded 0))
-                    (set 'lev-brk (get-adc-decoded 1))
+                    (setq lev-thr (get-adc-decoded 0))
+                    (setq lev-brk (get-adc-decoded 1))
                     (if (> profile-taps 0) (trap (read-profile-taps button-state)))
                     (button-apply button-state)
                     (if (and (not off) (gestures-allowed)) (handle-lever-gestures))
@@ -2721,7 +2719,7 @@
             (boot-state)
             (if rear-light-enable {
                 (pwm-start 200 0)
-                (set 'pwm-started true)
+                (setq pwm-started true)
             })
 
             ; Packet handling
@@ -2752,9 +2750,9 @@
                     (def app-f-40 (array-create 39))
                 }
             )
-            (set 'cur-cells (let ((n (conf-get 'si-battery-cells))) (if (> n 0) n 10)))
-            (set 'cur-wh-tot (* 0.85 (conf-get 'si-battery-ah) (* 3.7 (conf-get 'si-battery-cells))))
-            (set 'cur-cap (app-clamp16 (* (conf-get 'si-battery-ah) 1000)))
+            (setq cur-cells (let ((n (conf-get 'si-battery-cells))) (if (> n 0) n 10)))
+            (setq cur-wh-tot (* 0.85 (conf-get 'si-battery-ah) (* 3.7 (conf-get 'si-battery-cells))))
+            (setq cur-cap (app-clamp16 (* (conf-get 'si-battery-ah) 1000)))
             ; timestamps captured at load are frozen into the image - reset them
             ; here or the first measurement after a boot compares against a
             ; reference from whenever the image was written
@@ -2779,13 +2777,13 @@
                 (bufset-u16 tx-frame 0 0x55AA) ;Xiaomi protocol
                 (bufset-u16 tx-frame 2 0x0821)
                 (bufset-u16 tx-frame 4 0x6400) ; Packet is from ESC to BLE
-                (set 'rx-hdr 0x55aa)
-                (set 'rx-pre 1)
-                (set 'rx-o 0)
-                (set 'rx-sub 2)
-                (set 'tx-base 6)
-                (set 'thr-idx 4)
-                (set 'brk-idx 5)
+                (setq rx-hdr 0x55aa)
+                (setq rx-pre 1)
+                (setq rx-o 0)
+                (setq rx-sub 2)
+                (setq tx-base 6)
+                (setq thr-idx 4)
+                (setq brk-idx 5)
             } {
                 (define tx-frame (array-create (if (= model 3) 17 15)))
                 (bufset-u16 tx-frame 0 0x5AA5) ;Ninebot protocol
@@ -2798,14 +2796,14 @@
                     (bufset-u8 tx-frame 13 0x04)
                     (bufset-u8 tx-frame 14 0x91)
                 })
-                (set 'rx-hdr 0x5aa5)
-                (set 'rx-pre 4)
-                (set 'tx-base 7)
-                (set 'thr-idx 5)
-                (set 'brk-idx 6)
+                (setq rx-hdr 0x5aa5)
+                (setq rx-pre 4)
+                (setq tx-base 7)
+                (setq thr-idx 5)
+                (setq brk-idx 6)
             })
 
-            (looprange i 2 tx-base (set 'tx-hdr-sum (+ tx-hdr-sum (bufget-u8 tx-frame i))))
+            (looprange i 2 tx-base (setq tx-hdr-sum (+ tx-hdr-sum (bufget-u8 tx-frame i))))
 
             ; dash answer plus each app answer size - the dash frame is two bytes
             ; longer on the G2, so they can only be sized once it exists. Only the
@@ -2834,7 +2832,7 @@
             ; nothing on the bus would be answered for as long as that took.
             ; Seed the battery too - the reply carries it from the very first
             ; frame, and a dash told it has none may act on that.
-            (set 'cur-batt (* (get-batt) 100))
+            (setq cur-batt (* (get-batt) 100))
             (spawn 500 read-frames) ; 500 words: app replies allocate and nest deeper
 
             (apply-mode) ; Apply mode on start-up
@@ -2865,6 +2863,6 @@
 ; breaks until the next boot, so catch it here: true is what goes into the image,
 ; so a boot that came from one always reports success.
 (def img-ok true)
-(set 'img-ok (image-save))
+(setq img-ok (image-save))
 (if (not img-ok) (print "image-save failed - script too big, will not boot"))
 (main)
